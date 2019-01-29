@@ -8,6 +8,7 @@ International Journal of Computer Vision. 42(3), 145-175
 http://link.springer.com/article/10.1023/A:1011139631724
 """
 
+from __future__ import division
 import os, imageio
 import numpy as np
 from numpy import pi
