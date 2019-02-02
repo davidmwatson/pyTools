@@ -169,8 +169,8 @@ class LMgist():
 
         # Create Gabor filters for filtering if we don't have them already or
         # if they are the wrong size (e.g. new image has been supplied)
-        if self.G is None or \
-        not all(self.G.shape[:2] == np.array(self.im.shape) + 2*self.boundaryExtension):
+        ext_imshape = tuple(x + 2*self.boundaryExtension for x in self.im.shape)
+        if self.G is None or (self.G.shape[:2] != ext_imshape):
             self._createGabor()
 
         # Rescale pixel luminances

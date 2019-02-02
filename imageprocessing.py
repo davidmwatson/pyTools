@@ -743,8 +743,12 @@ class SoftWindowImage():
 
     Arguments
     ---------
-    image : any valid filepath, PIL Image instance, or numpy array
-        Class is instantiated with image.
+    mask_shape : str ('rect' | 'ellipse'), optional
+        Shape of mask to apply - rectangular or elliptical
+    mask_fwhm : float , optional
+        Width of mask across the image between half-maximum points of the
+        cosine ramp, specified as a proportion (between 0 and 1) of the
+        image dimensions.
 
     Methods
     -------
@@ -784,7 +788,7 @@ class SoftWindowImage():
 
         Arguments
         ---------
-        imsize - tuple, required
+        imsize : tuple, required
             (L, W) tuple of image dimensions. Trailing dims are ignored.
         """
         # Extract image length and width for brevity
@@ -854,7 +858,7 @@ class SoftWindowImage():
         im = imread(image, require_even=False)
 
         # Create mask if not already done
-        if self.mask is None:
+        if self.mask is None or (self.mask.shape != im.shape[:2]):
             self._createMask(im.shape)
 
         # If no bglum provided, use mean luminance of image
