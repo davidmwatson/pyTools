@@ -47,7 +47,8 @@ except ImportError:
 ##### UTILITY FUNCTION DEFINITIONS #####
 
 # Misc functions
-def imread(image, require_even=True, output_dtype=np.float64):
+def imread(image, require_even=True, output_dtype=np.float64,
+           pad_depth_channel=True, alpha_action='mask'):
     """
     Handles loading of image.
 
@@ -58,51 +59,61 @@ def imread(image, require_even=True, output_dtype=np.float64):
     require_even : bool, optional
         If True, will error if any image dimensions are not even numbers.
     output_dtype : numpy dtype, optional
-        Datatype to cast output array to.
+        Datatype to cast output array to. If None, datatype left unchanged.
+    pad_depth_channel : bool, optional
+        If True and image is grayscale, will pad a trailing dimension to
+        maintain compatibility with colour processing pipelines.
+    alpha_action : str {'remove' | 'mask'} or None, optional
+        What to do if image has an alpha channel. If 'remove', channel is
+        simply removed. If 'mask', channel is first used to mask image and
+        then removed. If None, channel left unchanged (not recommended).
 
     Returns
     -------
-    im : float64 np.ndarray
-        Loaded image. If image is grayscale, will be padded with a trailing
-        dimension so that it still works with colour processing pipelines in
-        other functions within this script.
-
+    im : np.ndarray
+        Loaded image.
     """
-    ### Load image into PIL Image instance first
-    # If its a filepath, load from filepath
+    # Load image into numpy array
     if isinstance(image, str) and os.path.isfile(image):
-        im = Image.open(image)
-    # If its a PIL image object, just assign straight into variable
+        im = np.asarray(Image.open(image))
     elif isinstance(image, Image.Image):
-        im = image
-    # If a numpy array, convert to PIL image object
+        im = np.asarray(image)
     elif isinstance(image, np.ndarray):
-        try:
-            im = Image.fromarray(image)
-        except TypeError:
-            im = Image.fromarray(image.astype(np.uint8))
-    # Else, error
+        im = image.copy()
     else:
         raise IOError('Image must be a valid filepath, PIL Image instance, or '
                       'numpy array')
 
-    # If alpha channel present, remove it and alert user
-    if im.mode in ('RGBA','LA') or 'transparency' in im.info.keys():
-        with warnings.catch_warnings():
-            warnings.simplefilter('always')
-            warnings.warn('Removing alpha channel and converting to RGB.')
-        im = im.convert('RGB')
-
-    # Convert image to numpy array
-    im = np.array(im, dtype=output_dtype)
+    # Handle alpha channel
+    if im.ndim == 3 and (im.shape[2] in [2,4]) and alpha_action:
+        if alpha_action == 'remove':
+            with warnings.catch_warnings():
+                warnings.simplefilter('always')
+                warnings.warn('Removing alpha channel')
+            im = im[..., :-1]
+        elif alpha_action == 'mask':
+            with warnings.catch_warnings():
+                warnings.simplefilter('always')
+                warnings.warn('Masking by alpha channel')
+            orig_dtype = im.dtype
+            im = im.astype(np.float64)
+            im, mask = np.split(im, [-1], axis=-1)
+            im *= mask / mask.max()
+            im = im.astype(orig_dtype)
+        else:
+            raise ValueError('Unrecognised alpha action')
 
     # If grayscale, pad a trailing dim so it works with colour pipelines
-    if im.ndim < 3:
-        im = np.expand_dims(im, axis = 2)
+    if im.ndim < 3 and pad_depth_channel:
+        im = np.expand_dims(im, axis=2)
 
     # Check length and width are even numbers
-    if require_even and (im.shape[0] % 2 or im.shape[1] % 2):
+    if require_even and any(np.mod(im.shape[:2], 2)):
         raise Exception('Image dimensions must be even numbers')
+
+    # Convert dtype
+    if output_dtype:
+        im = im.astype(output_dtype)
 
     # Return
     return im
