@@ -2,7 +2,7 @@
 """
 Script supports assorted image processing capabilities:
  * Phase scrambling (applyPhaseScram)
- * Applying soft windows (ApplySoftWindow)
+ * Applying soft windows (SoftWindowImage)
  * Making amplitude / phase image composites (combineAmplitudePhase)
  * Fourier filtering (FourierFilter)
  * Making amplitude masks (makeAmplitudeMask)
@@ -47,8 +47,8 @@ except ImportError:
 ##### UTILITY FUNCTION DEFINITIONS #####
 
 # Misc functions
-def imread(image, require_even=True, output_dtype=np.float64,
-           pad_depth_channel=True, alpha_action='mask'):
+def imread(image, output_dtype=np.float64, pad_depth_channel=True,
+           alpha_action='mask'):
     """
     Handles loading of image.
 
@@ -56,8 +56,6 @@ def imread(image, require_even=True, output_dtype=np.float64,
     ----------
     image : valid filepath, PIL Image instance, or numpy array - required
         Image to be loaded.
-    require_even : bool, optional
-        If True, will error if any image dimensions are not even numbers.
     output_dtype : numpy dtype, optional
         Datatype to cast output array to. If None, datatype left unchanged.
     pad_depth_channel : bool, optional
@@ -106,10 +104,6 @@ def imread(image, require_even=True, output_dtype=np.float64,
     # If grayscale, pad a trailing dim so it works with colour pipelines
     if im.ndim < 3 and pad_depth_channel:
         im = np.expand_dims(im, axis=2)
-
-    # Check length and width are even numbers
-    if require_even and any(np.mod(im.shape[:2], 2)):
-        raise Exception('Image dimensions must be even numbers')
 
     # Convert dtype
     if output_dtype:
@@ -168,12 +162,9 @@ def createFourierMaps(imsize, map_type):
     # Get length and width
     L,W = imsize[:2]
 
-    # Make sure dims are even numbers
-    assert not any([L % 2, W % 2]), 'Dimensions must be even numbers of pixels'
-
     # Make meshgrid
-    Wrng = ifftshift(np.arange(-W//2, W//2))
-    Lrng = ifftshift(np.arange(-L//2, L//2))
+    Wrng = ifftshift(np.arange(-np.floor(W/2), np.ceil(W/2)))
+    Lrng = ifftshift(np.arange(-np.floor(L/2), np.ceil(L/2)))
     [fx,fy] = np.meshgrid(Wrng, Lrng)
 
     # Create maps, return
@@ -332,7 +323,7 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
 
     """
     # Read in image
-    im = imread(image, require_even = False)
+    im = imread(image)
     L,W,D  = im.shape
 
     # Work out segments
@@ -404,8 +395,8 @@ def averageImages(image1, image2, **kwargs):
         Average of input images as numpy array with uint8 datatype.
     """
     # Read in images
-    im1 = imread(image1, require_even = False)
-    im2 = imread(image2, require_even = False)
+    im1 = imread(image1)
+    im2 = imread(image2)
 
     # Check images are same shape
     if im1.shape != im2.shape:
@@ -440,8 +431,8 @@ def combineAmplitudePhase(ampimage, phaseimage, **kwargs):
         Mean luminance is scaled to approximate the mean of the input images.
     """
     # Read in images
-    ampim = imread(ampimage, require_even = False)
-    phaseim = imread(phaseimage, require_even = False)
+    ampim = imread(ampimage)
+    phaseim = imread(phaseimage)
 
     # Check images are same shape
     if ampim.shape !=  phaseim.shape:
@@ -520,10 +511,6 @@ def makeAmplitudeMask(imsize, rgb=False, alpha=1, **kwargs):
     # Get L and W
     L = imsize[0]
     W = imsize[1]
-
-    # Ensure dimensions are even numbers
-    if L % 2 or W % 2:
-        raise Exception('L and W must be even numbers')
 
     # Get map of the spectrum
     SFmap = createFourierMaps([L,W], 'sf')
@@ -607,7 +594,7 @@ def overlayFixation(image=None, lum=255, offset=8, arm_length=12, arm_width=2,
         im = np.ones((L,W,D), dtype = float) * bglum
     # If image is specified, read it in
     else:
-        im = imread(image, require_even = False)
+        im = imread(image)
 
     # Determine midpoint of image
     hL, hW = im.shape[0]//2, im.shape[1]//2
@@ -866,7 +853,7 @@ class SoftWindowImage():
 
         """
         # Read image
-        im = imread(image, require_even=False)
+        im = imread(image)
 
         # Create mask if not already done
         if self.mask is None or (self.mask.shape != im.shape[:2]):
