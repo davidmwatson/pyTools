@@ -32,6 +32,7 @@ and install each of these:
 """
 
 ### Import statements
+from __future__ import division
 import os, warnings
 import numpy as np
 from numpy import pi
