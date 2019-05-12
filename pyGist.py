@@ -259,8 +259,7 @@ class LMgist():
         gistIdcs = np.arange(len(self.gist)).reshape(nFilters, nWindows)
 
         # Pre-allocate 4D array for storing plot data
-        plotData = np.empty([down_x, down_y, nWindows, nFilters],
-                            dtype=np.float32)
+        plotData = np.zeros([down_x, down_y, nWindows], dtype=np.float32)
 
         # Loop over filters
         for i in range(nFilters):
@@ -272,11 +271,11 @@ class LMgist():
             # Loop over windows
             for j in range(nWindows):
                 gistIdx = gistIdcs[i,j] # index in gist for win and filter
-                # Weight filter by value in gist, allocate to gist plots
-                plotData[:,:,j,i] = self.gist[gistIdx] * filt
+                # Weight filter by value in gist, add to gist plots
+                plotData[:,:,j] += self.gist[gistIdx] * filt
 
-        # Average across filters
-        plotData = plotData.mean(axis=3)
+        # Divide by nFilters to get mean
+        plotData /= nFilters
 
         ### Plot
         # Work out our colour limits
