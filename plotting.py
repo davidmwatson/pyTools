@@ -80,12 +80,17 @@ def get_fsl_cmap(cmap=None):
         }
     cdicts['gray'] = cdicts['grey']
 
-    # Handle reverse colourmap names
-    if cmap.endswith('_r'):
-        reverse = True
-        cmap = cmap[:-2]
-    else:
-        reverse = False
+    if cmap is not None:
+        # Handle reverse colourmap names
+        if cmap.endswith('_r'):
+            reverse = True
+            cmap = cmap[:-2]
+        else:
+            reverse = False
+
+        # Handle fsl- prefix
+        if cmap.startswith('fsl-'):
+                cmap = cmap[4:]
 
     # Create colormap, return
     try:
@@ -94,14 +99,14 @@ def get_fsl_cmap(cmap=None):
             cmap_obj = cmap_obj.reversed()
         return cmap_obj
     except KeyError:
-        raise Exception('cmap must be one of: ' \
-                        + ', '.join(sorted(cdicts.keys())))
+        raise KeyError('cmap must be one of: fsl-' \
+                       + ', fsl-'.join(sorted(cdicts.keys())))
 
 
-def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, nticks=6,
-              ticksize=24, tickpos=None, ticklabels=None, font='sans-serif',
-              fontsize=24, fontcolor='black', ori='vertical', figsize=None,
-              segmented=False, segment_interval=1):
+def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, labelsize=32,
+              nticks=6, ticksize=24, tickpos=None, ticklabels=None,
+              font='sans-serif', fontcolor='black', ori='vertical',
+              figsize=None, segmented=False, segment_interval=1):
     """
     Plots single colorbar.
 
@@ -117,6 +122,8 @@ def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, nticks=6,
         instance) or fsl colormap string (see get_fsl_cmap function).
     label : str, optional
         Axis label for colorbar
+    labelsize : int, optional
+        Fontsize for axis label
     nticks : int, optional
         Number of ticks to have on colorbar axis.
     ticksize : int, optional
@@ -129,8 +136,6 @@ def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, nticks=6,
         If specified, number of elements must match specified <nticks> value.
         If omitted, labels will be <nticks> evenly spaced values between
         <vmin> and <vmax>, formatted to specified number of dp.
-    labelsize : int, optional
-        Fontsize for axis label
     fontcolor : str, rgb / rgba tuple, or hex value, optional
         Font color of all text
     ori : str, optional
@@ -236,7 +241,7 @@ def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, nticks=6,
 
     # Define label from args
     if label is not None:
-        cb.set_label(label, size=fontsize, color=fontcolor, family=font)
+        cb.set_label(label, size=labelsize, color=fontcolor, family=font)
 
     # Loop through ticks and adjust font size & color
     if ori == 'vertical':
