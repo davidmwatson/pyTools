@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 """
 Script supports assorted image processing capabilities:
  * Phase scrambling (applyPhaseScram)
