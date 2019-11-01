@@ -420,9 +420,6 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
 
     # Add gridlines if requested
     if grid:
-        # Will need to reset axis lims afterwards, so get current ones now
-        xlims = ax.get_xlim()
-        ylims = ax.get_ylim()
         # Loop x conditions through and plot vertical gridlines
         for x in np.arange(0.5, x_Conds - 0.5):
             if avdiag == False:
@@ -439,20 +436,21 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
             elif avdiag in [True, 'done']:
                 # We are averaging across diagonal, only draw up to diagonal
                 ax.plot([-0.5, y+1], [y,y], '-k', linewidth=1)
-        # Reset x and y lims
-        ax.set_xlim(xlims)
-        ax.set_ylim(ylims)
 
     # Add matrix tick labels
     if nodiag:
         xticklabels = xticklabels[:-1]
         yticklabels = yticklabels[1:]
-    ax.set_xticks(range(x_Conds))
-    ax.set_yticks(range(y_Conds))
+    ax.set_xticks(np.arange(x_Conds))
+    ax.set_yticks(np.arange(y_Conds))
     ax.set_xticklabels(xticklabels, size=ticksize, family=font, color=fontcolor,
                        ha=xtickalignment, rotation=xtickrotation)
     ax.set_yticklabels(yticklabels, size=ticksize, family=font, color=fontcolor,
                        va=ytickalignment, rotation=ytickrotation)
+
+    # Set axis limits (can get messed up by preceding axis tweaks)
+    ax.set_xlim(-0.5, x_Conds-0.5)
+    ax.set_ylim(y_Conds-0.5, -0.5)
 
     # Iterate through matrix overlaying values if requested
     if annotate_vals:
