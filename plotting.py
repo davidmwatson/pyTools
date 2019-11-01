@@ -25,7 +25,6 @@ def _parse_cmap(cmap):
     return cmap
 
 
-
 def get_fsl_cmap(cmap=None):
     """
     Defines various fslview colormaps
@@ -74,13 +73,15 @@ def get_fsl_cmap(cmap=None):
         'copper' : {'red':[(0,0,0), (1/1.2,1,1), (1,1,1)],
                     'green':[(0,0,0), (1,0.8,0.8)],
                     'blue':[(0,0,0), (1,0.5,0.5)]},
-        'hot' : {'red':[(0,x,x), (1.0/3.0,1,1), (1,1,1)],
-                 'green':[(0,0,0), (1.0/3.0,x,x), (2.0/3.0,1,1), (1,1,1)],
-                 'blue':[(0,0,0), (2.0/3.0,x,x), (1,1,1)]}
+        'hot' : {'red':[(0,x,x), (1/3,1,1), (1,1,1)],
+                 'green':[(0,0,0), (1/3,x,x), (2/3,1,1), (1,1,1)],
+                 'blue':[(0,0,0), (2/3,x,x), (1,1,1)]}
         }
     cdicts['gray'] = cdicts['grey']
 
     if cmap is not None:
+        cmap = cmap.lower()
+
         # Handle reverse colourmap names
         if cmap.endswith('_r'):
             reverse = True
@@ -99,7 +100,7 @@ def get_fsl_cmap(cmap=None):
             cmap_obj = cmap_obj.reversed()
         return cmap_obj
     except KeyError:
-        raise KeyError('cmap must be one of: fsl-' \
+        raise KeyError('FSL cmap must be one of: fsl-' \
                        + ', fsl-'.join(sorted(cdicts.keys())))
 
 
@@ -157,7 +158,8 @@ def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, labelsize=32,
         ori = 'vertical'
     elif ori == 'h':
         ori = 'horizontal'
-    assert ori in ['vertical', 'horizontal']
+    if ori not in ['vertical', 'horizontal']:
+        raise ValueError("ori must be 'vertical' or 'horizontal'")
 
     # Handle cmap
     cmap = _parse_cmap(cmap)
@@ -211,7 +213,7 @@ def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, labelsize=32,
     else:
         # If not doing a segmented map, just define a continuous norm from vmin
         # to vmax
-        norm = mpl.colors.Normalize(vmin = vmin, vmax = vmax)
+        norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
 
     # Define colorbar
     cb = mpl.colorbar.ColorbarBase(ax, cmap=cmap, norm=norm, orientation=ori)
@@ -226,7 +228,7 @@ def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, labelsize=32,
         # For a segmented colormap, the ticks will occur at the boundaries by
         # default - we want them next to the segments themselves so we need to
         # place half a segment_interval up
-        cb.set_ticks(intrange + (segment_interval / 2.0))
+        cb.set_ticks(intrange + (segment_interval/2))
     else:
         # For a continuous colormap, just place them as they are
         cb.set_ticks(intrange)
@@ -365,32 +367,32 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
     # Prep array
     array = np.asarray(array, dtype='float').copy() # force numpy array
     # Get array shape
-    y_Conds, x_Conds = array.shape
-    if not x_Conds == y_Conds:
+    nYConds, nXConds = array.shape
+    if nXConds != nYConds:
         avdiag = False
         nodiag = False
 
     # Average across diagonal if requested
     if avdiag:
         # Iterate through all unique x,y index pairs (this block should only
-        # exectute if x_Conds == y_Conds, so we just arbitrarily use x_Conds)
-        for x,y in itertools.combinations(range(x_Conds),2):
+        # exectute if nXConds == nYConds, so we just arbitrarily use nXConds)
+        for x,y in itertools.combinations(range(nXConds),2):
             array[y,x] = np.mean([array[x,y],array[y,x]]) # set lower left to av value
             array[x,y] = np.nan # set upper right to nan
 
     # If not plotting diagonal, remove diagonal, 1st row, and last col
     if nodiag:
-        # This block should only execute if x_Conds == y_Conds, so we just
-        # arbitrarily make mask from x_Conds
-        array[np.eye(x_Conds).astype(bool)] = np.nan
+        # This block should only execute if nXConds == nYConds, so we just
+        # arbitrarily make mask from nXConds
+        array[np.eye(nXConds).astype(bool)] = np.nan
         array = array[1:, :-1]
-        x_Conds -= 1
-        y_Conds -= 1
+        nXConds -= 1
+        nYConds -= 1
 
     # Determine min/max if lims not specified (non nan values only)
     if lims is None:
-        x = np.ma.masked_array(array, np.isnan(array)) # use masked array to get non-nan lims
-        lims = [x.min(), x.max()]
+        mArr = np.ma.masked_array(array, np.isnan(array))
+        vmin, vmax = mArr.min(), mArr.max()
 
     # If we want a segmented colormap, need to set up some extra stuff
     if segmented:
@@ -398,7 +400,7 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
         # segments should occur.  We extend this range by 2 units - the
         # first to make the range include the upper limit value, and the
         # second to include the boundary at the top of the colormap.
-        bounds = np.arange(lims[0], lims[1]+(2*segment_interval), segment_interval)
+        bounds = np.arange(vmin, vmax+(2*segment_interval), segment_interval)
         # Create a boundary norm object - we use this to control the colormap
         norm = BoundaryNorm(bounds, cmap.N)
     else:
@@ -415,55 +417,52 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
     ax.set_ylabel(ylabel, size=labelsize, color=fontcolor, family=font)
 
     # Plot matrix
-    im = ax.imshow(array, cmap=cmap, vmin=lims[0], vmax=lims[1],
-                   interpolation='nearest', aspect='equal', norm=norm)
+    im = ax.imshow(array, cmap=cmap, vmin=vmin, vmax=vmax, norm=norm,
+                   interpolation='nearest', aspect='equal')
 
-    # Add gridlines if requested
+    # Add gridlines if requested. Draw lines across full plot if not
+    # averaging over diagonal, or just up to to diagonal if averaging
     if grid:
-        # Loop x conditions through and plot vertical gridlines
-        for x in np.arange(0.5, x_Conds - 0.5):
+        # Loop x coords and plot vertical gridlines
+        for i, x in enumerate(np.arange(0.5, nXConds-0.5)):
             if avdiag == False:
-                # We're not averaging across diagonal, draw across full plot
-                ax.plot([x, x], [-0.5, y_Conds-0.5], '-k', linewidth=1)
+                ax.axvline(x, color='k', ls='-', lw=1)
             elif avdiag in [True, 'done']:
-                # We are averaging across diagonal, only draw up to diagonal
-                ax.plot([x, x], [x-1, y_Conds-0.5], '-k', linewidth=1)
-        # Loop y conditions through and plot horizontal gridlines
-        for y in np.arange(0.5, y_Conds - 0.5):
+                ax.axvline(x, ymax=1-(i/nXConds), color='k', ls='-', lw=1)
+        # Loop y coords and plot horizontal gridlines
+        for j, y in enumerate(np.arange(0.5, nYConds-0.5)):
             if avdiag == False:
-                # We're not averaging across diagonal, draw across full plot
-                ax.plot([-0.5, x_Conds-0.5], [y,y],  '-k', linewidth=1)
+                ax.axhline(y, color='k', ls='-', lw=1)
             elif avdiag in [True, 'done']:
-                # We are averaging across diagonal, only draw up to diagonal
-                ax.plot([-0.5, y+1], [y,y], '-k', linewidth=1)
+                ax.axhline(y, xmax=(j+2)/nYConds, color='k', ls='-', lw=1)
 
     # Add matrix tick labels
     if nodiag:
         xticklabels = xticklabels[:-1]
         yticklabels = yticklabels[1:]
-    ax.set_xticks(np.arange(x_Conds))
-    ax.set_yticks(np.arange(y_Conds))
+    ax.set_xticks(np.arange(nXConds))
+    ax.set_yticks(np.arange(nYConds))
     ax.set_xticklabels(xticklabels, size=ticksize, family=font, color=fontcolor,
                        ha=xtickalignment, rotation=xtickrotation)
     ax.set_yticklabels(yticklabels, size=ticksize, family=font, color=fontcolor,
                        va=ytickalignment, rotation=ytickrotation)
 
-    # Set axis limits (can get messed up by preceding axis tweaks)
-    ax.set_xlim(-0.5, x_Conds-0.5)
-    ax.set_ylim(y_Conds-0.5, -0.5)
+    # Set axis limits (can get messed up by preceding plot tweaks)
+    ax.set_xlim(-0.5, nXConds-0.5)
+    ax.set_ylim(nYConds-0.5, -0.5)
 
     # Iterate through matrix overlaying values if requested
     if annotate_vals:
-        for x,y in itertools.product(range(y_Conds), range(x_Conds)):
-            if ~np.isnan(array[x,y]): # don't label blank spaces
-                ax.text(y, x, '{:.{}f}'.format(array[x,y], dp), ha='center',
+        for x,y in itertools.product(range(nXConds), range(nYConds)):
+            if ~np.isnan(array[y,x]): # don't label blank spaces
+                ax.text(x, y, '{:.{}f}'.format(array[y,x], dp), ha='center',
                         va='center', fontsize=ticksize, family=font,
                         color=fontcolor)
 
     # Plot colorbar if requested
     if cbar:
         # Set up tick range and labels
-        cbrng = np.linspace(lims[0], lims[1], cbar_nticks)
+        cbrng = np.linspace(vmin, vmax, cbar_nticks)
         if cbar_ticklabels is not None:
             if len(cbar_ticklabels) != cbar_nticks:
                 raise ValueError('Number of colorbar tick labels must match '
@@ -490,7 +489,7 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
 
 
 def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
-                     theta_direction='clockwise', cmap='jet', axis_opt=None,
+                     theta_direction='clockwise', cmap=None, axis_opt=None,
                      xticks=None, yticks=None, xticklabels=None,
                      yticklabels=None, font='sans-serif', fontcolor='black',
                      fontsize=10, grid=False, cbar=False, dp=2, cbarlabel='',
@@ -505,7 +504,8 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
         Plot data. Selected strings 'angle' or 'eccentricity' can be
         used to make polar angle or eccentricity maps. Abbreviation 'ecc' also
         accepted. Alternatively, can supply own data as a numpy array with
-        length equal to length of <theta>, and width equal to length of <r>.
+        columns corresponding to values of <theta>, and rows corresponding to
+        values of <r>.
     r : 1D numpy array, optional
         Radial values to plot over. Will use a default range if not specified.
     theta : 1D numpy array, optional
