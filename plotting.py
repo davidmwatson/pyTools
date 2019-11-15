@@ -267,7 +267,8 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
                 fontsize=18, titlesize=None, labelsize=None, ticksize=None,
                 lims=None, dp=2, cbarlabel='', cbar_nticks=5,
                 cbar_ticklabels=None, font='sans-serif', cmap=None,
-                fontcolor='black', segmented=False, segment_interval=1):
+                fontcolor='black', segmented=False, segment_interval=1,
+                ax=None):
     """
     Function for plotting confusion / similarity matrix.
 
@@ -334,6 +335,8 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
         Set to True to use a segmented colormap
     segment_interval : float, optional
         Interval between segments of colorbar (ignored if segmented = False)
+    ax : axis handle or None, optional
+        If provided, attach plot to existing axis.
 
     Returns
     -------
@@ -409,16 +412,20 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
         bounds = norm = None
 
     # Create plot and axes
-    fig, ax = plt.subplots()
+    if ax is None:
+        fig, _ax = plt.subplots()
+    else:
+        fig = ax.figure
+        _ax = ax
 
     # Set title, x and y labels
-    ax.set_title(title, size=titlesize, family=font, color=fontcolor)
-    ax.set_xlabel(xlabel, size=labelsize, color=fontcolor, family=font)
-    ax.set_ylabel(ylabel, size=labelsize, color=fontcolor, family=font)
+    _ax.set_title(title, size=titlesize, family=font, color=fontcolor)
+    _ax.set_xlabel(xlabel, size=labelsize, color=fontcolor, family=font)
+    _ax.set_ylabel(ylabel, size=labelsize, color=fontcolor, family=font)
 
     # Plot matrix
-    im = ax.imshow(array, cmap=cmap, vmin=vmin, vmax=vmax, norm=norm,
-                   interpolation='nearest', aspect='equal')
+    im = _ax.imshow(array, cmap=cmap, vmin=vmin, vmax=vmax, norm=norm,
+                    interpolation='nearest', aspect='equal')
 
     # Add gridlines if requested. Draw lines across full plot if not
     # averaging over diagonal, or just up to to diagonal if averaging
@@ -426,38 +433,38 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
         # Loop x coords and plot vertical gridlines
         for i, x in enumerate(np.arange(0.5, nXConds-0.5)):
             if avdiag == False:
-                ax.axvline(x, color='k', ls='-', lw=1)
+                _ax.axvline(x, color='k', ls='-', lw=1)
             elif avdiag in [True, 'done']:
-                ax.axvline(x, ymax=1-(i/nXConds), color='k', ls='-', lw=1)
+                _ax.axvline(x, ymax=1-(i/nXConds), color='k', ls='-', lw=1)
         # Loop y coords and plot horizontal gridlines
         for j, y in enumerate(np.arange(0.5, nYConds-0.5)):
             if avdiag == False:
-                ax.axhline(y, color='k', ls='-', lw=1)
+                _ax.axhline(y, color='k', ls='-', lw=1)
             elif avdiag in [True, 'done']:
-                ax.axhline(y, xmax=(j+2)/nYConds, color='k', ls='-', lw=1)
+                _ax.axhline(y, xmax=(j+2)/nYConds, color='k', ls='-', lw=1)
 
     # Add matrix tick labels
     if nodiag:
         xticklabels = xticklabels[:-1]
         yticklabels = yticklabels[1:]
-    ax.set_xticks(np.arange(nXConds))
-    ax.set_yticks(np.arange(nYConds))
-    ax.set_xticklabels(xticklabels, size=ticksize, family=font, color=fontcolor,
-                       ha=xtickalignment, rotation=xtickrotation)
-    ax.set_yticklabels(yticklabels, size=ticksize, family=font, color=fontcolor,
-                       va=ytickalignment, rotation=ytickrotation)
+    _ax.set_xticks(np.arange(nXConds))
+    _ax.set_yticks(np.arange(nYConds))
+    _ax.set_xticklabels(xticklabels, size=ticksize, family=font, color=fontcolor,
+                        ha=xtickalignment, rotation=xtickrotation)
+    _ax.set_yticklabels(yticklabels, size=ticksize, family=font, color=fontcolor,
+                        va=ytickalignment, rotation=ytickrotation)
 
     # Set axis limits (can get messed up by preceding plot tweaks)
-    ax.set_xlim(-0.5, nXConds-0.5)
-    ax.set_ylim(nYConds-0.5, -0.5)
+    _ax.set_xlim(-0.5, nXConds-0.5)
+    _ax.set_ylim(nYConds-0.5, -0.5)
 
     # Iterate through matrix overlaying values if requested
     if annotate_vals:
         for x,y in itertools.product(range(nXConds), range(nYConds)):
             if ~np.isnan(array[y,x]): # don't label blank spaces
-                ax.text(x, y, '{:.{}f}'.format(array[y,x], dp), ha='center',
-                        va='center', fontsize=ticksize, family=font,
-                        color=fontcolor)
+                _ax.text(x, y, '{:.{}f}'.format(array[y,x], dp), ha='center',
+                         va='center', fontsize=ticksize, family=font,
+                         color=fontcolor)
 
     # Plot colorbar if requested
     if cbar:
@@ -485,7 +492,7 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
             t.set_family(font)
 
     # Return figure and axes
-    return fig, ax
+    return fig, _ax
 
 
 def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
@@ -493,7 +500,7 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
                      xticks=None, yticks=None, xticklabels=None,
                      yticklabels=None, font='sans-serif', fontcolor='black',
                      fontsize=10, grid=False, cbar=False, dp=2, cbarlabel='',
-                     cbar_nticks=5, cbar_ticklabels=None):
+                     cbar_nticks=5, cbar_ticklabels=None, ax=None):
     """
     Makes polar pcolormesh plot, e.g. for making polar angle or eccentricity
     colourmaps.
@@ -549,6 +556,9 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
         match specified <cbar_nticks> value. If omitted, labels will be
         <cbar_nticks> evenly spaced values, formatted to specified <dp>.
         Ignored if <cbar> is False.
+    ax : axis handle or None, optional
+        If provided, attach plot to existing axis. Note that existing axis
+        MUST be created with polar projection.
 
     Returns
     -------
@@ -614,34 +624,40 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
         elif C == 'angle':
             C = ftheta
 
-    # Create figure and plot
-    fig, ax = plt.subplots(subplot_kw={'polar':True})
-    im = ax.pcolormesh(ftheta, fr, C, cmap=cmap, vmin=C.min(), vmax=C.max())
+    # Create figure
+    if ax is None:
+        fig, _ax = plt.subplots(subplot_kw={'polar':True})
+    else:
+        _ax = ax
+        fig = _ax.figure
+
+    # Plot
+    im = _ax.pcolormesh(ftheta, fr, C, cmap=cmap, vmin=C.min(), vmax=C.max())
 
     # Set axis details
     if axis_opt is not None:
-        ax.axis(axis_opt)
-    ax.grid(grid)
-    ax.set_theta_direction(theta_direction)
-    ax.set_theta_zero_location('N', 0)
-    ax.set_thetamin(theta_lims[0])
-    ax.set_thetamax(theta_lims[1])
+        _ax.axis(axis_opt)
+    _ax.grid(grid)
+    _ax.set_theta_direction(theta_direction)
+    _ax.set_theta_zero_location('N', 0)
+    _ax.set_thetamin(theta_lims[0])
+    _ax.set_thetamax(theta_lims[1])
 
     if xticks is not None:
         if theta_units.startswith('deg'):
             xticks = np.radians(xticks)
-        ax.set_xticks(xticks)
+        _ax.set_xticks(xticks)
     if yticks is not None:
-        ax.set_yticks(yticks)
+        _ax.set_yticks(yticks)
     if xticklabels is not None:
-        ax.set_xticklabels(xticklabels)
+        _ax.set_xticklabels(xticklabels)
     if yticklabels is not None:
-        ax.set_yticklablels(yticklabels)
+        _ax.set_yticklablels(yticklabels)
 
-    ax.tick_params(labelsize=fontsize, labelcolor=fontcolor)
-    for t in ax.get_xticklabels():
+    _ax.tick_params(labelsize=fontsize, labelcolor=fontcolor)
+    for t in _ax.get_xticklabels():
         t.set_family(font)
-    for t in ax.get_yticklabels():
+    for t in _ax.get_yticklabels():
         t.set_family(font)
 
     # Plot colorbar if requested
@@ -663,4 +679,4 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
             t.set_family(font)
 
     # Return
-    return fig, ax
+    return fig, _ax
