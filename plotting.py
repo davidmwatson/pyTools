@@ -392,10 +392,12 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
         nXConds -= 1
         nYConds -= 1
 
-    # Determine min/max if lims not specified (non nan values only)
+    # Determine min/max from lims (if specified) or array otherwise
     if lims is None:
         mArr = np.ma.masked_array(array, np.isnan(array))
         vmin, vmax = mArr.min(), mArr.max()
+    else:
+        vmin, vmax = lims
 
     # If we want a segmented colormap, need to set up some extra stuff
     if segmented:
