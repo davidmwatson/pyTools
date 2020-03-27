@@ -279,8 +279,10 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
         appear blank in the plot)
     cbar : bool, optional
         Set to True to plot a colorbar
-    annotate_vals : bool, optional
-        Set to True to overlay text values on matrix cells
+    annotate_vals : bool or numpy.ndarray, optional
+        Set to True to overlay text values on matrix cells. If a numpy array
+        the same size as <array> is supplied, will annotate the values
+        contained on this array instead.
     avdiag : bool or str ('done'), optional
         Set to True to average values across diagonal. Set as 'done' if this
         has already been done. Will be forced to False if array is not square.
@@ -375,6 +377,13 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
         avdiag = False
         nodiag = False
 
+    # Error check annotate_vals
+    if not isinstance(annotate_vals, (bool, np.ndarray)):
+        raise TypeError('annotate_vals must be bool or numpy.ndarray')
+    elif (isinstance(annotate_vals, np.ndarray) and
+          annotate_vals.shape != array.shape):
+        raise ValueError('annotate_vals must be same shape as array')
+
     # Average across diagonal if requested
     if avdiag:
         # Iterate through all unique x,y index pairs (this block should only
@@ -389,6 +398,8 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
         # arbitrarily make mask from nXConds
         array[np.eye(nXConds).astype(bool)] = np.nan
         array = array[1:, :-1]
+        if isinstance(annotate_vals, np.ndarray):
+            annotate_vals = annotate_vals[1:, :-1]
         nXConds -= 1
         nYConds -= 1
 
@@ -461,12 +472,20 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
     _ax.set_ylim(nYConds-0.5, -0.5)
 
     # Iterate through matrix overlaying values if requested
-    if annotate_vals:
+    if annotate_vals is not False:
         for x,y in itertools.product(range(nXConds), range(nYConds)):
-            if ~np.isnan(array[y,x]): # don't label blank spaces
-                _ax.text(x, y, '{:.{}f}'.format(array[y,x], dp), ha='center',
-                         va='center', fontsize=ticksize, family=font,
-                         color=fontcolor)
+            if isinstance(annotate_vals, bool):
+                val = array[y,x]
+                if np.isnan(val):
+                    continue  # ignore nans
+                else:
+                    txt = '{0:.{1}f}'.format(val, dp)
+            elif isinstance(annotate_vals, np.ndarray):
+                txt = str(annotate_vals[y,x])
+
+            _ax.text(x, y, txt, ha='center',
+                     va='center', fontsize=ticksize, family=font,
+                     color=fontcolor)
 
     # Plot colorbar if requested
     if cbar:
