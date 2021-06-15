@@ -32,7 +32,6 @@ def sigmoid(x, x0, k):
     """
     return 1 / ( 1 + np.exp(-k*(x-x0)) )
 
-
 def weibullCDF(x, gamma, k):
     """
     Weibull cumulative density function.
@@ -57,7 +56,6 @@ def weibullCDF(x, gamma, k):
     return y
 
 
-
 ##### Class definitions #####
 
 class _BaseFitFunction(object):
@@ -65,7 +63,7 @@ class _BaseFitFunction(object):
     Base class arguments
     --------------------
     func : function instance, optional
-        Non-linear function to fit.  Must accept an array of x-values as its
+        Objective function to fit.  Must accept an array of x-values as its
         first argument, and then any further arguments should be function
         parameters that are to be estimated via the fitting process.  Default
         is to use a Gaussian CDF.
@@ -106,6 +104,11 @@ class _BaseFitFunction(object):
     If wanting to do MLE, child class must implement a method .negLogLik,
     taking an array of parameters as its only argument, and returning
     a single-value giving the negative log-likelihood.
+
+    Child class must assign self.x attribute - an array containing values for
+    predictor variable. If wanting to do least square, child class must
+    additionally assign self.y attribute - an array containing values for
+    outcome variable.
     """
     def __init__(self, func=stats.norm.cdf, invfunc=stats.norm.ppf,
                  fit_method='mle', ymin=0, lapse=0):
@@ -136,7 +139,6 @@ class _BaseFitFunction(object):
         self.func = func
         self.invfunc = invfunc
 
-
     @property
     def func(self):
         return self._func
@@ -150,7 +152,6 @@ class _BaseFitFunction(object):
             ymin = params.pop(-1) if self.ymin == 'optim' else self.ymin
             return ymin + (1 - ymin - lapse) * np.asarray(fun(x, *params))
         self._func = _func
-
 
     @property
     def invfunc(self):
@@ -169,7 +170,6 @@ class _BaseFitFunction(object):
             ymin = params.pop(-1) if self.ymin == 'optim' else self.ymin
             return fun((np.asarray(y) - ymin) / (1 - ymin - lapse), *params)
         self._invfunc = _invfunc
-
 
     def doFit(self, *args, **kwargs):
         """
@@ -233,7 +233,6 @@ class _BaseFitFunction(object):
                 self.fit = curve_fit(self.func, self.x, self.y, x0,
                                      *args, **kwargs)
 
-
     def getFittedParams(self):
         """
         Return fitted parameters if .doFit has been run.
@@ -246,7 +245,6 @@ class _BaseFitFunction(object):
         elif self.fit_method == 'lsq':
             return self.fit[0]
 
-
     def getXForY(self, y):
         """
         Use inverse function to get corresponding x-value for given y-value.
@@ -257,7 +255,6 @@ class _BaseFitFunction(object):
         if self.invfunc is None:
             raise RuntimeError('Inverse function was not supplied')
         return self.invfunc(y, *params)
-
 
     def doInterp(self, npoints=100, interpX=None):
         """
@@ -283,6 +280,11 @@ class _BaseFitFunction(object):
         interpY = self.func(interpX, *params)
         return (interpX, interpY)
 
+    def negLogLik(self):
+        """
+        Place holder for negLogLik function to be implemented by child class.
+        """
+        raise NotImplementedError()
 
 
 class FitFunction(_BaseFitFunction):
@@ -295,8 +297,8 @@ class FitFunction(_BaseFitFunction):
     x, y : array-like, required
         Predictor and outcome variables, respectively, which the function is to
         be fit to.  Each should be an (nsamples,) 1D array.
-    mle_func : function instance
-        Function for evaluating log-likelihood of residuals. Ignored if
+    mle_costfunc : function instance
+        Cost function for evaluating log-likelihood of residuals. Ignored if
         fit_method is 'lsq'. Should accept array of y-axis residual values
         as its only argument. Default is a Gaussian PDF.
     *args, **kwargs :
@@ -363,12 +365,11 @@ class FitFunction(_BaseFitFunction):
     """
     __doc__ += _BaseFitFunction.__doc__
 
-    def __init__(self, x, y, mle_func=stats.norm.pdf, *args, **kwargs):
+    def __init__(self, x, y, mle_costfunc=stats.norm.pdf, *args, **kwargs):
         self.x = np.asarray(list(x))
         self.y = np.asarray(list(y))
-        self.mle_func = mle_func
+        self.mle_costfunc = mle_costfunc
         super(FitFunction, self).__init__(*args, **kwargs)
-
 
     def negLogLik(self, params):
         """
@@ -376,15 +377,15 @@ class FitFunction(_BaseFitFunction):
         """
         ypred = self.func(self.x, *params)
         resid = self.y - ypred
-        return -np.log(self.mle_func(resid).clip(min=1e-10)).sum()
-
+        return -np.log(self.mle_costfunc(resid).clip(min=1e-10)).sum()
 
 
 class MLEBinomFitFunction(_BaseFitFunction):
     """
     Class contains functions for fitting a non-linear function in the special
     case where the data are derived from Bernoulli trials, i.e. where an event
-    either happens or doesn't.  Fit is done via MLE using a binomial PMF.
+    either happens or doesn't.  Fit is done via MLE using a binomial PMF cost
+    function.
 
     Arguments
     ---------
@@ -467,12 +468,11 @@ class MLEBinomFitFunction(_BaseFitFunction):
         kwargs['fit_method'] = 'mle'  # force MLE
         super(MLEBinomFitFunction, self).__init__(*args, **kwargs)
 
-
     def negLogLik(self, params):
         """
-        Computes negative log likelihood via fitting a Binomial PMF, using
-        probability values generated by the given non-linear function.
-        Params should be for the non-linear function.
+        Computes negative log likelihood via a Binomial PMF cost function,
+        using probability values generated by the given objective function.
+        Params should be for the objective function.
         """
         p = self.func(self.x, *params)
         return -np.log(stats.binom.pmf(self.counts, self.n, p).clip(min=1e-10)).sum()
