@@ -517,7 +517,7 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
 
 
 def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
-                     theta_direction='clockwise', cmap=None, axis_opt=None,
+                     theta_direction='clockwise', cmap=None, shading='gouraud',
                      xticks=None, yticks=None, xticklabels=None,
                      yticklabels=None, font='sans-serif', fontcolor='black',
                      fontsize=10, grid=False, cbar=False, dp=2, cbarlabel='',
@@ -530,10 +530,10 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
     ---------
     C : str ('angle' | eccentricity') or 2D numpy array, required
         Plot data. Selected strings 'angle' or 'eccentricity' can be
-        used to make polar angle or eccentricity maps. Abbreviation 'ecc' also
-        accepted. Alternatively, can supply own data as a numpy array with
-        columns corresponding to values of <theta>, and rows corresponding to
-        values of <r>.
+        used to make polar angle or eccentricity maps. Abbreviations 'pol' and
+        'ecc' also accepted. Alternatively, can supply own data as a numpy
+        array with columns corresponding to values of <theta>, and rows
+        corresponding to values of <r>.
     r : 1D numpy array, optional
         Radial values to plot over. Will use a default range if not specified.
     theta : 1D numpy array, optional
@@ -549,8 +549,8 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
     cmap : str or matplotlib cmap instance, optional
         May be any valid matplotlib colormap (string or matplotlib cmap
         instance) or fsl colormap string (see get_fsl_cmap function).
-    axis_opt : str, optional
-        One of the valid string options to ax.axis(), e.g. 'on' or 'off'
+    shading : str ('flat' | 'nearest' | 'gouraud' | 'auto'), optional
+        Fill style for the qudrilatera's (see pcolormesh)
     xticks, yticks : list, optional
         Tick positions along angular and radial axes respectively.
         <xticks> should be specified in units of <theta_units>.
@@ -589,8 +589,6 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
     # Error check args
     if not isinstance(C, (np.ndarray, str)):
         raise TypeError('C must be numpy array or str')
-    if isinstance(C, str) and C not in ['angle', 'ecc', 'eccentricity']:
-        raise ValueError('C must be \'angle\' or \'eccentricity\' if str')
 
     if hemi and hemi not in ['both', 'left', 'right', 'top', 'bottom']:
         raise ValueError('Invalid hemi')
@@ -642,8 +640,10 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
     if isinstance(C, str):
         if C.startswith('ecc'):
             C = fr
-        elif C == 'angle':
+        elif C in ['pol', 'angle']:
             C = ftheta
+        else:
+            raise ValueError(f'Invalid string argument for C: {C}')
 
     # Create figure
     if ax is None:
@@ -653,12 +653,10 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
         fig = _ax.figure
 
     # Plot
-    im = _ax.pcolormesh(ftheta, fr, C, cmap=cmap, vmin=C.min(), vmax=C.max())
+    im = _ax.pcolormesh(ftheta, fr, C, cmap=cmap, vmin=C.min(), vmax=C.max(),
+                        shading=shading)
 
     # Set axis details
-    if axis_opt is not None:
-        _ax.axis(axis_opt)
-    _ax.grid(grid)
     _ax.set_theta_direction(theta_direction)
     _ax.set_theta_zero_location('N', 0)
     _ax.set_thetamin(theta_lims[0])
