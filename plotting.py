@@ -517,11 +517,12 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
 
 
 def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
-                     theta_direction='clockwise', cmap=None, shading='gouraud',
-                     xticks=None, yticks=None, xticklabels=None,
-                     yticklabels=None, font='sans-serif', fontcolor='black',
-                     fontsize=10, grid=False, cbar=False, dp=2, cbarlabel='',
-                     cbar_nticks=5, cbar_ticklabels=None, ax=None):
+                     theta_direction='clockwise', cmap=None, vmin=None,
+                     vmax=None, shading='gouraud', xticks=None, yticks=None,
+                     xticklabels=None, yticklabels=None, font='sans-serif',
+                     fontcolor='black', fontsize=10, grid=False, cbar=False,
+                     dp=2, cbarlabel='', cbar_nticks=5, cbar_ticklabels=None,
+                     ax=None):
     """
     Makes polar pcolormesh plot, e.g. for making polar angle or eccentricity
     colourmaps.
@@ -535,10 +536,11 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
         array with columns corresponding to values of <theta>, and rows
         corresponding to values of <r>.
     r : 1D numpy array, optional
-        Radial values to plot over. Will use a default range if not specified.
+        Radial values to plot over. Will use a default range between 0 and 1 if
+        not specified.
     theta : 1D numpy array, optional
-        Angular values to plot over. Will use a default range dependent on
-        <hemi> if not specified. Note that 0 is at 12 o'clock.
+        Angular values to plot over. Will use a default range (in radians)
+        dependent on <hemi> if not specified. Note that 0 is at 12 o'clock.
     hemi : str ('both' | 'left' | 'right' | 'top' | 'bottom'), optional
         Which hemifield to plot. Ignored if <theta> is specified.
     theta_units : str ('rad' | 'deg'), optional
@@ -549,6 +551,8 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
     cmap : str or matplotlib cmap instance, optional
         May be any valid matplotlib colormap (string or matplotlib cmap
         instance) or fsl colormap string (see get_fsl_cmap function).
+    vmin, vmax : float, optional
+        Limits for colourmap. If not specified, will default to data limits.
     shading : str ('flat' | 'nearest' | 'gouraud' | 'auto'), optional
         Fill style for the qudrilatera's (see pcolormesh)
     xticks, yticks : list, optional
@@ -645,6 +649,12 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
         else:
             raise ValueError(f'Invalid string argument for C: {C}')
 
+    # Check color limits
+    if vmin is None:
+        vmin = C.min()
+    if vmax is None:
+        vmax = C.max()
+
     # Create figure
     if ax is None:
         fig, _ax = plt.subplots(subplot_kw={'polar':True})
@@ -653,7 +663,7 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
         fig = _ax.figure
 
     # Plot
-    im = _ax.pcolormesh(ftheta, fr, C, cmap=cmap, vmin=C.min(), vmax=C.max(),
+    im = _ax.pcolormesh(ftheta, fr, C, cmap=cmap, vmin=vmin, vmax=vmax,
                         shading=shading)
 
     # Set axis details
@@ -681,7 +691,7 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
 
     # Plot colorbar if requested
     if cbar:
-        cbrng = np.linspace(C.min(), C.max(), cbar_nticks)
+        cbrng = np.linspace(vmin, vmax, cbar_nticks)
         if cbar_ticklabels is not None:
             if len(cbar_ticklabels) != cbar_nticks:
                 raise ValueError('Number of colorbar tick labels must match '
