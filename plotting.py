@@ -681,7 +681,7 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
     if xticklabels is not None:
         _ax.set_xticklabels(xticklabels)
     if yticklabels is not None:
-        _ax.set_yticklablels(yticklabels)
+        _ax.set_yticklabels(yticklabels)
 
     _ax.tick_params(labelsize=fontsize, labelcolor=fontcolor)
     for t in _ax.get_xticklabels():
