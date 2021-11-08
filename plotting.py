@@ -8,7 +8,7 @@ import itertools
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib.colors import BoundaryNorm
+from matplotlib.colors import Normalize, BoundaryNorm
 from matplotlib.colors import LinearSegmentedColormap
 
 
@@ -410,19 +410,17 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
     else:
         vmin, vmax = lims
 
-    # If we want a segmented colormap, need to set up some extra stuff
+    # Set bounds and norm depending on if continuous or segmented colourmap
     if segmented:
         # Define the bounds, i.e. values at which boundaries between color
         # segments should occur.  We extend this range by 2 units - the
         # first to make the range include the upper limit value, and the
         # second to include the boundary at the top of the colormap.
         bounds = np.arange(vmin, vmax+(2*segment_interval), segment_interval)
-        # Create a boundary norm object - we use this to control the colormap
         norm = BoundaryNorm(bounds, cmap.N)
     else:
-        # If we don't want a segmented colormap we emulate the same args
-        # but set them to None, causing matplotlib to use its defaults
-        bounds = norm = None
+        bounds = None
+        norm = Normalize(vmin=vmin, vmax=vmax)
 
     # Create plot and axes
     if ax is None:
@@ -437,8 +435,8 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
     _ax.set_ylabel(ylabel, size=labelsize, color=fontcolor, family=font)
 
     # Plot matrix
-    im = _ax.imshow(array, cmap=cmap, vmin=vmin, vmax=vmax, norm=norm,
-                    interpolation='nearest', aspect='equal')
+    im = _ax.imshow(array, cmap=cmap, norm=norm, interpolation='none',
+                    aspect='equal')
 
     # Add gridlines if requested. Draw lines across full plot if not
     # averaging over diagonal, or just up to to diagonal if averaging
@@ -504,7 +502,7 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
             cbrng += segment_interval / 2
 
         # Do colorbar
-        cb = fig.colorbar(im, boundaries=bounds, norm=norm)
+        cb = fig.colorbar(im, boundaries=bounds)
         cb.set_ticks(cbrng)
         cb.set_ticklabels(cbar_ticklabels)
         cb.set_label(cbarlabel, size=labelsize, family=font, color=fontcolor)
