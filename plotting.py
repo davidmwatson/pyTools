@@ -435,7 +435,7 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
     _ax.set_ylabel(ylabel, size=labelsize, color=fontcolor, family=font)
 
     # Plot matrix
-    im = _ax.imshow(array, cmap=cmap, norm=norm, interpolation='none',
+    im = _ax.imshow(array, cmap=cmap, norm=norm, interpolation='nearest',
                     aspect='equal')
 
     # Add gridlines if requested. Draw lines across full plot if not
