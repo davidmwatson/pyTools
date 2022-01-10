@@ -26,8 +26,8 @@ and install each of these:
  * numpy
  * scipy
  * Python Image Library (PIL) or Pillow
- * matplotlib
- * imageio
+ * matplotlib (plotAverageAmpSpec only)
+ * imageio (plotAverageAmpSpec only)
 
 """
 
@@ -38,11 +38,10 @@ import numpy as np
 from numpy import pi
 from numpy.fft import fft2, ifft2, fftshift, ifftshift
 import scipy.ndimage
-import matplotlib.pyplot as plt
 try:
-    import Image # will work on most installations
+    import Image  # via PIL
 except ImportError:
-    from PIL import Image # if installed via pillow
+    from PIL import Image  # via pillow
 
 
 ##### UTILITY FUNCTION DEFINITIONS #####
@@ -86,14 +85,10 @@ def imread(image, output_dtype=np.float64, pad_depth_channel=True,
     # Handle alpha channel
     if im.ndim == 3 and (im.shape[2] in [2,4]) and alpha_action:
         if alpha_action == 'remove':
-            with warnings.catch_warnings():
-                warnings.simplefilter('always')
-                warnings.warn('Removing alpha channel')
+            warnings.warn('Removing alpha channel')
             im = im[..., :-1]
         elif alpha_action == 'mask':
-            with warnings.catch_warnings():
-                warnings.simplefilter('always')
-                warnings.warn('Masking by alpha channel')
+            warnings.warn('Masking by alpha channel')
             orig_dtype = im.dtype
             im = im.astype(np.float64)
             im, mask = np.split(im, [-1], axis=-1)
@@ -267,11 +262,13 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
         apply, with 0 being fully scrambled (default) and 1 being not scrambled
         at all.
     rndphi : array, optional
-        Array of random phases.
+        2D array of random phases - allows using a custom phase spectrum.
+        Should be same size as image segments (or whole image if nSegs == 1).
     mask : array, optional
         Mask of weights in range 0-1 that can be applied to random phase array
         (e.g. to scramble only certain parts of the spectrum).  Mask should be
-        for an unshifted spectrum.
+        for an unshifted spectrum, and same size as image segments (or whole
+        image if nSegs == 1),
     nSegs : int, optional
         Number of segments to split image into.  If nSegs is 1 (default),
         scrambling is performed across entire image (i.e. global scrambling).
@@ -293,34 +290,34 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
     --------
     Phase scramble image with 0% coherence
 
-    >>> scram1 = applyPhaseScram('/some/image.png')
+    >>> im = imageio.imread('imageio:camera.png')
+    >>> scram1 = applyPhaseScram(im)
 
     Scramble with 40% phase coherence
 
-    >>> scram2 = applyPhaseScram('/some/image.png', coherence = .4)
+    >>> scram2 = applyPhaseScram(im, coherence = .4)
 
     Use own random phase array
 
     >>> import numpy as np
-    >>> myrndphi = np.angle(np.fft.fft2(np.random.rand(im_height, im_width)))
-    >>> scram3 = applyPhaseScram('/some/image.png', rndphi = myrndphi)
+    >>> myrndphi = np.angle(np.fft.fft2(np.random.rand(*im.shape)))
+    >>> scram3 = applyPhaseScram(im, rndphi = myrndphi)
 
     Weight rndphi by mask.  Here we weight by an inverted horizontal-pass
     filter to scramble vertical orientations but preserve horizontals.
 
     >>> from imageprocessing import FourierFilter
-    >>> impath = '/some/image.png'
-    >>> filterer = FourierFilter(impath)
+    >>> filterer = FourierFilter(im)
     >>> filt = filterer.makeFilter(
     ...     mode='ori', filtertype='gaussian', invert=True,
     ...     filter_kwargs = {'mu':np.radians(0),
     ...                      'sigma':fwhm2sigma(np.radians(45))}
     ...     )
-    >>> scram4 = applyPhaseScram(impath, mask = filt)
+    >>> scram4 = applyPhaseScram(im, mask = filt)
 
     Locally scrambled image within windows of an 8x8 grid
 
-    >>> local_scram = applyPhaseScram('/some/image.png', nSegs = 8)
+    >>> local_scram = applyPhaseScram(im, nSegs = 8)
 
     """
     # Read in image
@@ -329,8 +326,9 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
 
     # Work out segments
     if L % nSegs or W % nSegs:
-        raise ValueError('Image dimensions ({0}, {1}) must be divisible by '
-                         'nSegs ({2})'.format(L, W, nSegs))
+        raise ValueError(
+            f'Image dimensions ({L},{W}) must be divisible by nSegs ({nSegs})'
+            )
     segL = L // nSegs
     segW = W // nSegs
 
@@ -366,11 +364,11 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
                 ampF = np.abs(F)
                 phiF = np.angle(F)
                 # Calculate new phase spectrum
-                newphi = phiF + rndphi
+                phiF += rndphi
                 # Combine original amplitude spectrum with new phase spectrum
-                newF = ampF * np.exp(newphi * 1j)
+                F[:] = ampF * np.exp(phiF * 1j)
                 # Inverse transform, assign into scram
-                scram[y1:y2, x1:x2, i] = ifft2(newF).real
+                scram[y1:y2, x1:x2, i] = ifft2(F).real
 
     # Postproc and return
     return postproc_im(scram, **kwargs)
@@ -642,16 +640,17 @@ def plotAverageAmpSpec(indir, ext='png', nSegs=1, dpi=96, cmap='jet'):
     dpi : int, optional
         Resolution to save plots at (default = 96).
     cmap : any valid matplotlib cmap instance
-        Colourmap for filled contour plot
+        Colourmap for filled contour plot.
     """
     # Local imports just for this function
     import glob, imageio
+    import matplotlib.pyplot as plt
 
     # Ensure . character not included in extension
     ext = ext.strip('.')
 
     # Glob for input files
-    infiles = sorted(glob.glob(os.path.join(indir, '*.%s' %ext)))
+    infiles = sorted(glob.glob(os.path.join(indir, f'*.{ext}')))
     if len(infiles) == 0:
         raise IOError('No images found! Check directory and extension')
 
@@ -662,8 +661,9 @@ def plotAverageAmpSpec(indir, ext='png', nSegs=1, dpi=96, cmap='jet'):
 
     # Work out if we can segment image evenly, and dims of windows if we can
     if L % nSegs or W % nSegs:
-        raise IOError('Image dimensions ({0}, {1}) must be divisible by '
-                      'nSegs ({2})'.format(L, W, nSegs))
+        raise ValueError(
+            f'Image dimensions ({L},{W}) must be divisible by nSegs ({nSegs})'
+            )
     segL = L // nSegs
     segW = W // nSegs
 
@@ -688,7 +688,7 @@ def plotAverageAmpSpec(indir, ext='png', nSegs=1, dpi=96, cmap='jet'):
                 ampF = np.abs(fftshift(fft2(win)))
                 # Log scale, assign relevant window of spectrum (we use ampF+1
                 # to avoid any -ve values from log scaling values < 1)
-                spectra[i, y:y+segL, x:x+segW] = np.log(ampF + 1)
+                spectra[i, y:y+segL, x:x+segW] = np.log1p(ampF)
         spectra[i] /= spectra[i].max() # scale full array to range 0:1
 
     # Create average spectrum
@@ -700,7 +700,7 @@ def plotAverageAmpSpec(indir, ext='png', nSegs=1, dpi=96, cmap='jet'):
     os.makedirs(outdir, exist_ok=True)
 
     # Main numpy array
-    savename = os.path.join(outdir, 'win{}_array.npy'.format(nSegs))
+    savename = os.path.join(outdir, f'win{nSegs}_array.npy')
     np.save(savename, av_spectrum)
 
     # Filled contour figure
@@ -713,9 +713,9 @@ def plotAverageAmpSpec(indir, ext='png', nSegs=1, dpi=96, cmap='jet'):
     cf = ax.contourf(av_spectrum, origin = 'upper')
     cf.set_cmap(cmap)
     cf.set_clim([0,1])
-    savename = os.path.join(outdir, 'win%s_filled_contour.png' %(nSegs))
+    savename = os.path.join(outdir, f'win{nSegs}_filled_contour.png')
     fig.savefig(savename, dpi = dpi)
-    print('Saved %s' %savename)
+    print('Saved ' + savename)
     plt.close(fig)
 
     # Line contour figure
@@ -726,9 +726,9 @@ def plotAverageAmpSpec(indir, ext='png', nSegs=1, dpi=96, cmap='jet'):
     # spectrum in range 0:1
     ax.contour(av_spectrum, [0.45, 0.55], colors = 'k', linewidths = 2,
                origin = 'upper')
-    savename = os.path.join(outdir, 'win%s_line_contour.png' %(nSegs))
+    savename = os.path.join(outdir, f'win{nSegs}_line_contour.png')
     fig.savefig(savename, dpi = dpi)
-    print('Saved %s' %savename)
+    print('Saved ' + savename)
     plt.close(fig)
 
 
@@ -758,19 +758,21 @@ class SoftWindowImage():
     --------
     Apply a rectangular soft window
 
+    >>> im = imageio.imread('imageio:camera.png')
     >>> windower = SoftWindowImage('rect')
-    >>> winIm = windower.maskImage('./some/image.png')
+    >>> winIm = windower.maskImage(im)
 
     The mask is created when the first image is processed, and stored within
     the class. The mask can be re-used for subsequent images of the same size
 
-    >>> winIm2 = windower.maskImage('./some/other_image.png')
+    >>> im2 = imageio.imread('imageio:wikkie.png')
+    >>> winIm2 = windower.maskImage(im2)
 
     Create an elliptical mask with a fwhm of 0.8, and apply to image setting
     background to be white
 
     >>> windower = SoftWindowImage('ellipse', mask_fwhm=0.8)
-    >>> winIm3 = windower.maskImage('./some/image.png', bglum=255)
+    >>> winIm3 = windower.maskImage(im, bglum=255)
     """
     def __init__(self, mask_shape, mask_fwhm=0.9):
         if mask_shape not in ['ellipse', 'rect']:
@@ -778,7 +780,6 @@ class SoftWindowImage():
         self.mask_shape = mask_shape
         self.mask_fwhm = mask_fwhm
         self.mask = None  # placeholder for mask
-
 
     def _createMask(self, imsize):
         """
@@ -830,7 +831,6 @@ class SoftWindowImage():
 
         # Assign to class
         self.mask = mask
-
 
     def maskImage(self, image, bglum='mean', **kwargs):
         """

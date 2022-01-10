@@ -147,13 +147,13 @@ def readImage(image, grayscale=True, dtype=float, alpha_action='mask'):
     """
     # Load image
     if isinstance(image, np.ndarray):
-        im = image
+        im = image.copy()
     elif isinstance(image, Image.Image):
         im = np.asarray(image)
     elif isinstance(image, str) and os.path.exists(image):
         im = np.asarray(imageio.imread(image))
     else:
-        raise IOError('Cannot read image {}'.format(image))
+        raise IOError(f'Cannot read image {image}')
 
     # Handle alpha channel
     if im.ndim == 3 and (im.shape[2] in [2,4]):

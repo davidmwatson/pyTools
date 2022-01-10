@@ -239,12 +239,13 @@ class LMgist():
         import matplotlib.pyplot as plt
         from matplotlib.colors import Normalize
         from mpl_toolkits.axes_grid1 import ImageGrid
+        from scipy.signal import decimate
 
         # Some admin stuff
         if not mode in ['imshow','contour']:
             raise ValueError('mode should be \'imshow\' or \'contour\'')
         nWindows = self.nBlocks**2
-        df = 4  # down-sampling factor
+        q = 4  # down-sampling factor
 
         # If we don't already have filters, try to make them (note - user must
         # specify an image or imageSize argument for this to work)
@@ -252,19 +253,19 @@ class LMgist():
             self._createGabor()
 
         # Work out filter dims and number of filters
-        x, y, nFilters = self.G.shape
-        down_x, down_y = int(np.ceil(x/df)), int(np.ceil(y/df)) # size after downsampling
+        H, W, nFilters = self.G.shape
+        down_H, down_W = int(np.ceil(H/q)), int(np.ceil(W/q)) # size after downsampling
 
         # Indices describing which window and filter each point in gist relates to
         gistIdcs = np.arange(len(self.gist)).reshape(nFilters, nWindows)
 
         # Pre-allocate 4D array for storing plot data
-        plotData = np.zeros([down_x, down_y, nWindows], dtype=np.float32)
+        plotData = np.zeros([down_H, down_W, nWindows], dtype=np.float32)
 
         # Loop over filters
         for i in range(nFilters):
             # Get filter (down-sample to reduce memory load)
-            filt = self.G[::df, ::df, i]
+            filt = decimate(decimate(self.G[..., i], q, axis=0), q, axis=1)
             # Mirror about origin to give other 'tail' of filter, apply fftshift
             filt = fftshift(filt + np.rot90(filt,2))
 
@@ -317,7 +318,7 @@ class LMgist():
         elif isinstance(image, Image.Image):
             im = np.asarray(image)
         elif isinstance(image, np.ndarray):
-            im = image
+            im = image.copy()
         else:
             raise IOError('Image must be a valid filepath, Image instance, '
                           'or numpy array')
@@ -520,7 +521,7 @@ if __name__ == '__main__':
 
     # Plot showGist
     fig = gist.showGist()
-    fig.canvas.set_window_title('Fig 4: GIST visualised with showGIST')
+    fig.canvas.manager.set_window_title('Fig 4: GIST visualised with showGIST')
 
     # Display
     plt.show()
