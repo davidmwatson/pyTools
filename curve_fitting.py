@@ -20,8 +20,10 @@ def sigmoid(x, x0, k):
     ---------
     x : array like, required
         Values to plot over.
+
     x0 : float, required
         Mid-point of function (y=0.5 when x=x0).
+
     k : float, required
         Slope parameter of function.
 
@@ -40,9 +42,11 @@ def weibullCDF(x, gamma, k):
     ---------
     x : array like, required
         Values to plot over.
+
     gamma : float, required
         Scale parameter.  Parameter is often referred to as lambda, but that
         name has a special meaning in Python so we use gamma instead here.
+
     k : float, required
         Shape parameter.
 
@@ -58,41 +62,51 @@ def weibullCDF(x, gamma, k):
 
 ##### Class definitions #####
 
-class _BaseFitFunction(object):
+class BaseFitFunction(object):
     """
     Base class arguments
     --------------------
     func : function instance, optional
-        Objective function to fit.  Must accept an array of x-values as its
+        Objective function to fit.  Must accept a 1D array of x-values as its
         first argument, and then any further arguments should be function
         parameters that are to be estimated via the fitting process.  Default
         is to use a Gaussian CDF.
+
     invfunc : function instance or None, optional
-        Inverse of main function. Only necessary if wanting to use the
-        .getXForY method.
+        Inverse of main function. Must accept a 1D array of y-values as its
+        first argument, then any further arguments should be function
+        parameters that have been estimated via the fitting process. Default
+        is to use a Gaussian quantile function. Only necessary if wanting to
+        use the .getXForY method.
+
     fit_method : 'mle' or 'lsq', optional
-        Fitting method to use.  Pass 'mle' to use maximum-likelihood estimation
-        (default), or 'lsq' to use non-linear least squares.
+        Fitting method to use.  Set to 'mle' to use maximum-likelihood
+        estimation (default), or 'lsq' to use non-linear least squares.
+
     ymin : float, optional
         Expected minimum value of y (e.g. use to adjust for chance level). Can
-        also specify as 'optim' to add this as an additional optimisation
-        parameter - note that in this case the ymin parameter must be appended
-        as the final (if lapse != 'optim') or penultimate (if lapse == 'optim')
-        value in any starting parameters, bounds, etc.
+        also specify as string 'optim' to instead optimise the parameter - note
+        that in this case the ymin parameter must be appended as the final
+        (if lapse != 'optim') or penultimate (if lapse == 'optim') value in any
+        starting parameters, bounds, etc.
+
     lapse : float | 'optim', optional
-        Lapse parameter (expected ymax = 1 - lapse). Can also specify as str
-        'optim' to add this as an additional optimisation parameter - note
-        that in this case the lapse parameter must then be appended as the
-        final value in any starting parameters, bounds, etc.
+        Lapse parameter (expected ymax = 1 - lapse). Can also specify as string
+        'optim' to instead optimise the parameter - note that in this case the
+        lapse parameter must be appended as the final value in any starting
+        parameters, bounds, etc.
 
     Base class methods
     ------------------
     .doFit
         Performs function fitting.
+
     .doInterp
         Returns interpolated values for x and y variables, e.g. for plotting.
+
     .getFittedParams
         Return fitted parameters, assuming .doFit has already been run.
+
     .getXForY
         Use inverse function to get x-value for given y-value.
     """
@@ -106,7 +120,7 @@ class _BaseFitFunction(object):
     a single-value giving the negative log-likelihood.
 
     Child class must assign self.x attribute - an array containing values for
-    predictor variable. If wanting to do least square, child class must
+    predictor variable. If wanting to do least squares, child class must
     additionally assign self.y attribute - an array containing values for
     outcome variable.
     """
@@ -146,12 +160,13 @@ class _BaseFitFunction(object):
     @func.setter
     def func(self, fun):
         """Setter adjusts forward func for ymin and lapse params"""
-        def _func(x, *params):
+        def f(x, *params):
             params = list(params)
             lapse = params.pop(-1) if self.lapse == 'optim' else self.lapse
             ymin = params.pop(-1) if self.ymin == 'optim' else self.ymin
             return ymin + (1 - ymin - lapse) * np.asarray(fun(x, *params))
-        self._func = _func
+
+        self._func = f
 
     @property
     def invfunc(self):
@@ -164,56 +179,68 @@ class _BaseFitFunction(object):
             self._invfunc = None
             return
 
-        def _invfunc(y, *params):
+        def f(y, *params):
             params = list(params)
             lapse = params.pop(-1) if self.lapse == 'optim' else self.lapse
             ymin = params.pop(-1) if self.ymin == 'optim' else self.ymin
             return fun((np.asarray(y) - ymin) / (1 - ymin - lapse), *params)
-        self._invfunc = _invfunc
 
-    def doFit(self, *args, **kwargs):
-        """
-        Performs the function fit.  May include further positional and / or
-        keyword arguments to be passed to the relevant optimization function.
-        These vary depending on the fitting method chosen:
-        * If using MLE, these should be additional arguments for the
-          scipy.optimize.minimize function. Note that this requires a first
-          positional argument or keyword argument 'x0' containing initial
-          guesses for the non-linear function parameters.
-        * If using non-linear least squares, should be additional arguments for
-          the scipy.optimize.curve_fit function. Although not required, it is
-          recommended that you supply a first positional argument or keyword
-          argument 'p0' containing initial guesses for the non-linear
-          function parameters.
-        * See the documentation for the minimize / curve_fit functions for
-          more details on other available arguments.
-        * If optimising ymin parameter (self.ymin == 'optim') then this
-          parameter must be included as the final (if self.lapse != 'optim')
-          or penultimate (if self.lapse == 'optim') value in any relevant args.
-        * If optimising lapse parameter (self.lapse == 'optim') then this
-          parameter must be included as the final value in any relevant args.
-        * Starting parameters can also be specified as a list of lists, where
-          each inner list contains a range of values for a given parameter
-          (i.e. each inner list represents a function parameter in turn).
-          In this case a grid search is performed over all parameter
-          combinations, and the best performing set is selected for the
-          optimisation procedure. The selected values will be stored in the
-          .selected_x0 attribute.
+        self._invfunc = f
 
-        Results are stored within the .fit attribute of this class, and can
-        also be accessed with the .getFittedParams method.
+    def doFit(self, x0=None, *args, **kwargs):
         """
-        # Pop out starting params (so we can check for grid search)
-        if self.fit_method == 'mle' and 'x0' in kwargs:
-            x0 = kwargs.pop('x0')
-        elif self.fit_method == 'lsq' and 'p0'in kwargs:
+        Performs the function fit.
+
+        Arguments
+        ---------
+        x0 : array-like, optional
+            Optional (but recommended) list of starting parameter values for
+            the optimisation. If fitting by least squares, this substitutes the
+            p0 argument of the scipy.optimize.curve_fit function. Can also be
+            specified as a list of lists, where each inner list contains a
+            range of values for a given parameter (i.e. each inner list
+            represents a function parameter in turn). In this case an initial
+            grid search is performed over all parameter combinations, and the
+            best performing set is selected for the optimisation procedure. The
+            selected values will be stored in the .selected_x0 attribute.
+
+        *args, **kwargs
+            Additional arguments passed to the relevant optimisation function
+            (scipy.optimize.minimize if using MLE, or scipy.optimize.curve_fit
+            if using least squares).
+
+        Notes
+        -----
+        * If optimising ymin parameter (ymin == 'optim') then this parameter
+          must be included as the final (if lapse != 'optim') or penultimate
+          (if lapse == 'optim') value in any relevant args.
+
+        * If optimising lapse parameter (lapse == 'optim') then this parameter
+          must be included as the final value in any relevant args.
+
+        * If specifying parameter bounds via the <bounds> keyword argument, the
+          usage differs according to the fitting method:
+
+          - For MLE, bounds are specified as (lower, upper) array-likes for
+            each paramter in turn,
+            e.g. bounds = [(p1_lower, p1_upper), (p2_lower, p2_upper), etc].
+            To leave a parameter unbounded, specify the value as None.
+
+          - For least squares, bounds are specified as a 2-item list of
+            array-likes, where the first and second items give the lower and
+            upper bounds for all parameters respectively,
+            e.g. bounds = [(p1_lower, p2_lower, etc), (p1_upper, p2_upper, etc)].
+            To leave a parameter unbounded, specify as +/-inf.
+
+        * Results are stored within the .fit attribute of this class, and can
+          also be accessed with the .getFittedParams method.
+        """
+        # minimize uses x0 kwarg, curve_fit uses p0 kwarg - allow either name
+        if 'p0' in kwargs.keys():
             x0 = kwargs.pop('p0')
-        else:
-            args = list(args)
-            x0 = args.pop(0)
 
         # Grid search?
-        if all(hasattr(_x0, '__iter__') for _x0 in x0):
+        if x0 is not None and all(hasattr(_x0, '__iter__') for _x0 in x0):
             x0grid = list(itertools.product(*x0))
             errs = []
             for _x0 in x0grid:
@@ -230,7 +257,7 @@ class _BaseFitFunction(object):
             if self.fit_method == 'mle':
                 self.fit = minimize(self.negLogLik, x0, *args, **kwargs)
             elif self.fit_method == 'lsq':
-                self.fit = curve_fit(self.func, self.x, self.y, x0,
+                self.fit = curve_fit(self.func, self.x, self.y, p0=x0,
                                      *args, **kwargs)
 
     def getFittedParams(self):
@@ -267,7 +294,7 @@ class _BaseFitFunction(object):
             Number of points to interpolate. Ignored if interpX is not None.
         interpX : array-like or None, optional
             Interpolated x-values to calculate y-values over. If None, will
-            create a default range (see npoints).
+            create a default range (with length specified by npoints).
 
         Returns
         -------
@@ -287,10 +314,10 @@ class _BaseFitFunction(object):
         raise NotImplementedError()
 
 
-class FitFunction(_BaseFitFunction):
+class FitFunction(BaseFitFunction):
     """
-    Class provides functions for fitting a non-linear function via maximum
-    likelihood (using a normal PDF) or non-linear least squares.
+    Class provides functions for fitting a non-linear function via either
+    maximum likelihood (using a Gaussian PDF cost function) or least squares.
 
     Arguments
     ---------
@@ -299,7 +326,7 @@ class FitFunction(_BaseFitFunction):
         be fit to.  Each should be an (nsamples,) 1D array.
     mle_costfunc : function instance
         Cost function for evaluating log-likelihood of residuals. Ignored if
-        fit_method is 'lsq'. Should accept array of y-axis residual values
+        fit_method is 'lsq'. Should accept a 1D array of y-axis residual values
         as its only argument. Default is a Gaussian PDF.
     *args, **kwargs :
         Futher arguments passed to base class (see below)
@@ -334,18 +361,18 @@ class FitFunction(_BaseFitFunction):
     >>> mle_params = mle_fit.getFittedParams()
 
     Fit the function using non-linear least squares. For both the initial
-    guess (p0) and the bound values, the parameters refer to the Gaussian CDF
+    guess (x0) and the bound values, the parameters refer to the Gaussian CDF
     parameters (mu, sigma).  Bounds are specified as two tuples giving the
     minimum and maximum values respectively, each containing values for each
     of the function parameters in turn.
 
     >>> lsq_fit = FitFunction(x, ynoise, fit_method='lsq')
-    >>> lsq_p0 = (0, 1)
+    >>> lsq_x0 = (0, 1)
     >>> lsq_bounds = ( (min(x), 1e-5), (max(x), np.inf) )
-    >>> lsq_fit.doFit(p0=lsq_p0, bounds=lsq_bounds, method='trf')
+    >>> lsq_fit.doFit(x0=lsq_x0, bounds=lsq_bounds, method='trf')
     >>> lsq_params = lsq_fit.getFittedParams()
 
-    Inspect function fits.
+    Check fitted paramters.
 
     >>> print(f'True parameters: mu = {true_mu}, sigma = {true_sigma}')
     >>> print(f'MLE parameter estimates: mu = {mle_params[0]}, sigma = {mle_params[1]}')
@@ -363,7 +390,7 @@ class FitFunction(_BaseFitFunction):
     >>> plt.legend()
     >>> plt.show()
     """
-    __doc__ += _BaseFitFunction.__doc__
+    __doc__ += BaseFitFunction.__doc__
 
     def __init__(self, x, y, mle_costfunc=stats.norm.pdf, *args, **kwargs):
         self.x = np.asarray(list(x))
@@ -380,7 +407,7 @@ class FitFunction(_BaseFitFunction):
         return -np.log(self.mle_costfunc(resid).clip(min=1e-10)).sum()
 
 
-class MLEBinomFitFunction(_BaseFitFunction):
+class MLEBinomFitFunction(BaseFitFunction):
     """
     Class contains functions for fitting a non-linear function in the special
     case where the data are derived from Bernoulli trials, i.e. where an event
@@ -393,14 +420,17 @@ class MLEBinomFitFunction(_BaseFitFunction):
         The values along which the predictor variable varies. May be bin values
         in the case where x is discrete, or just a list of the individual
         x-values where x is continuous.  Should be an (nsamples,) 1D array.
+
     counts : array-like of ints, required
         The counts (sums) of the number of occurences of the measured event
         within each level of x. These can be the 0 and 1 values from the
         Bernoulli trials themselves if x is continous.
+
     n : int or array-like of ints, required
         The total number of trials.  Can be a single integer in which case the
         same number is assumed for all levels of x, or a list of separate
         integers for each level of x. This can be set to 1 if x is continuous.
+
     *args, **kwargs :
         Further arguments passed to base class (see below). Note that the
         fit_method argument will be overidden and set to 'mle'.
@@ -440,7 +470,7 @@ class MLEBinomFitFunction(_BaseFitFunction):
     >>> fit.doFit(x0=x0, bounds=bounds, method='L-BFGS-B')
     >>> mle_params = fit.getFittedParams()
 
-    Inspect function fits.
+    Check fitted parameters.
 
     >>> print(f'True parameters: mu = {true_mu}, sigma = {true_sigma}')
     >>> print(f'MLE parameter estimates: mu = {mle_params[0]}, sigma = {mle_params[1]}')
@@ -456,7 +486,7 @@ class MLEBinomFitFunction(_BaseFitFunction):
     >>> plt.legend()
     >>> plt.show()
     """
-    __doc__ += _BaseFitFunction.__doc__
+    __doc__ += BaseFitFunction.__doc__
 
     def __init__(self, x, counts, n, *args, **kwargs):
         self.x = np.asarray(list(x))
