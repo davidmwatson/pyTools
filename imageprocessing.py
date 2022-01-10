@@ -900,14 +900,15 @@ class FourierFilter():
     Low-pass Gaussian filter image at FHWM = 30 cycles/image
 
     >>> from imageprocessing import fwhm2sigma
-    >>> filterer = FourierFilter('/some/image.png')
+    >>> im = imageio.imread('imageio:camera.png')
+    >>> filterer = FourierFilter(im)
     >>> lowfilt = filterer.makeFilter(
     ...     mode='sf', filtertype='gaussian',
     ...     filter_kwargs={'mu':0, 'sigma':fwhm2sigma(30)}
     ...     )
     >>> lowim = filterer.applyFilter(lowfilt)
 
-    High-pass Gaussian filter at FWHM = 50 cycles / image
+    High-pass Gaussian filter at FWHM = 50 cycles/image
 
     >>> highfilt = filterer.makeFilter(
     ...     mode='sf', filtertype='gaussian', invert=True,
@@ -924,14 +925,14 @@ class FourierFilter():
     ...     )
     >>> vertim = filterer.applyFilter(vertfilt)
 
-    Oblique-pass Butterworth filter with cut-offs 15 degrees either side
-    of centre orientations and an order of 5
+    Oblique-pass 2nd-order Butterworth filter with cut-offs 15 degrees either
+    side of centre orientations.
 
     >>> oblqfilt = filterer.makeFilter(
     ...     mode='ori', filtertype='butterworth',
-    ...     filter_kwargs=[ {'cutoff':np.radians(15), 'order':5,
+    ...     filter_kwargs=[ {'cutoff':np.radians(15), 'order':2,
     ...                      'mu':np.radians(45)},
-    ...                     {'cutoff':np.radians(15), 'order':5,
+    ...                     {'cutoff':np.radians(15), 'order':2,
     ...                      'mu':np.radians(135)} ]
     ...     )
     >>> oblqim = filterer.applyFilter(oblqfilt)
@@ -944,12 +945,39 @@ class FourierFilter():
     ...                                 filter_kwargs={'cutoff':30})
     >>> idealim = filterer.applyFilter(idealfilt)
 
+    If only wanting to create the filter, and the image dimensions are known
+    in advance, the filter can also be made by the .filter_from_imsize class
+    method without requiring the class to instantiated or a real image to be
+    loaded.
+
+    >>> lowfilt = FourierFilter.filter_from_imsize(
+    ...     imsize=(512,512), mode='sf', filtertype='gaussian',
+    ...     filter_kwargs={'mu':0, 'sigma':fwhm2sigma(30)}
+    ...    )
     """
     def __init__(self, im):
         # Read image
         self.im = imread(im)
-        self.imdims = self.im.shape
 
+    @classmethod
+    def filter_from_imsize(cls, imsize, *args, **kwargs):
+        """
+        Class method returns filter based simply on image dimensions, without
+        requiring class to be instantiated or a real image to be loaded.
+
+        Parameters
+        ----------
+        imsize : array-like, required
+            (height, width) array giving image size in pixels.
+        *args, **kwargs
+            Additional arguments passed to .makeFilter method.
+
+        Returns
+        -------
+        filt : numpy array
+            Requested filter as numpy array
+        """
+        return cls(np.zeros(imsize)).makeFilter(*args, **kwargs)
 
     def makeFilter(self, mode, filtertype, filter_kwargs={}, invert=False):
         """
@@ -1024,7 +1052,7 @@ class FourierFilter():
             filter_kwargs = [filter_kwargs]
 
         # Create spatial frequency or orientations map
-        X = createFourierMaps(self.imdims, mode)
+        X = createFourierMaps(self.im.shape[:2], mode)
 
         # Pre-allocate filter, including trailing dimension for each sub-filter
         filt = np.empty( X.shape + (len(filter_kwargs),) )
@@ -1056,7 +1084,6 @@ class FourierFilter():
         # Return
         return filt
 
-
     def applyFilter(self, filt, **kwargs):
         """
         Apply filter to image.
@@ -1080,11 +1107,10 @@ class FourierFilter():
         filtim = np.empty_like(self.im)
 
         # Loop over colour channels (will execute only once if grayscale)
-        for i in range(self.imdims[2]):
+        for i in range(self.im.shape[2]):
             F = fft2(self.im[:,:,i]) # into frequency domain
-            filtF = F * filt # apply filter
-            filtim[:,:,i] = ifft2(filtF).real # back to image domain
+            F *= filt # apply filter
+            filtim[:,:,i] = ifft2(F).real # back to image domain
 
         # Postproc and return
         return postproc_im(filtim, **kwargs)
-
