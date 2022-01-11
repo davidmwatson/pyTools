@@ -1,47 +1,118 @@
 #!/usr/bin/env python3
-
 """
 Assorted methods for fitting non-linear functions.
+
+Provides classes for fitting functions to data:
+ * FitFunction - provides methods for fitting functions to a continuously
+   distributed outcome variable via either MLE or least squares.
+ * MLEBinomFitFunction - provides methods for fitting functions to a binary
+   outcome variable (e.g. as derived from Bernoulli trials) via MLE.
+
+Also provides classes giving forward and inverse functions for some common
+psychometric function types (actually the functions are already in scipy,
+these classes just wrap those into a more convenient format):
+ * Gaussian - gives Gaussian CDF (forward) and quantile (inverse) functions.
+ * Sigmoid - gives Sigmoid logistic (forward) and logit (inverse) functions.
+ * Weibull - gives Weibull CDF (forward) and quantile (inverse) functions.
 """
 
 import itertools
 import numpy as np
-from scipy import stats
+import scipy.stats
 from scipy.optimize import curve_fit, minimize
 
 
-#### Function definitions ####
+##### Psychometric functions #####
 
-def sigmoid(x, x0, k):
+class Gaussian(object):
     """
-    Sigmoid (logistic) function.
+    Gaussian cumulative density and quantile functions.
 
-    Arguments
+    Wraps scipy.stats.norm.
+
+    Parameters
+    ----------
+    x,y : array like
+        1D array of x/y values to plot over
+
+    mu : float
+        Mean parameter; y = 0.5 when x = mu
+
+    sigma : float
+        Standard deviation parameter
+
+    Equations
     ---------
-    x : array like, required
-        Values to plot over.
+    **CDF**
 
-    x0 : float, required
-        Mid-point of function (y=0.5 when x=x0).
+    .. math::
+        f(x) = \\frac{1}{2} \\left[ 1 + \\text{erf} \\left(
+                   \\frac{x - \\mu}{\\sigma \\sqrt{2} }
+                   \\right) \\right]
 
-    k : float, required
-        Slope parameter of function.
+    **Quantile**
 
-    Returns
-    -------
-    y : numpy array
-        y-values of function.
+    .. math::
+        f(y) = \\mu + \\sigma \\sqrt{2} \,\\text{erf}^{-1} (2y - 1)
     """
-    return 1 / ( 1 + np.exp(-k*(x-x0)) )
+    @staticmethod
+    def cdf(x, mu, sigma):
+        return scipy.stats.norm.cdf(x, loc=mu, scale=sigma)
 
-def weibullCDF(x, gamma, k):
+    @staticmethod
+    def quantile(y, mu, sigma):
+        return scipy.stats.norm.ppf(y, loc=mu, scale=sigma)
+
+
+class Sigmoid(object):
     """
-    Weibull cumulative density function.
+    Sigmoid logistic and logit (inverse of logistic) functions.
 
-    Arguments
+    Wraps scipy.stats.logistic.
+
+    Parameters
+    ----------
+    x,y : array like
+        1D array of x/y values to plot over
+
+    x0 : float
+        Mid-point parameter; y = 0.5 when x = x0
+
+    k : float
+        Slope parameter
+
+    Equations
     ---------
-    x : array like, required
-        Values to plot over.
+    **Logistic**
+
+    .. math::
+        f(x) = \\frac{1}{1 + \\exp(-k(x - x_0))}
+
+    **Logit**
+
+    .. math::
+        f(y) = x_0 + \\frac{ \\ln \\left( \\frac{y}{1-y} \\right) } {k}
+    """
+    @staticmethod
+    def logistic(x, x0, k):
+        return scipy.stats.logistic.cdf(x, loc=x0, scale=1/k)
+
+    @staticmethod
+    def logit(y, x0, k):
+        return scipy.stats.logistic.ppf(y, loc=x0, scale=1/k)
+
+
+class Weibull(object):
+    """
+    Weibull cumulative density and quantile functions.
+
+    Wraps scipy.stats.weibull_min.
+
+    Parameters
+    ----------
+    x,y : array like
+        1D array of x/y values to plot over. Note that the function is
+        undefined for x < 0.
 
     gamma : float, required
         Scale parameter.  Parameter is often referred to as lambda, but that
@@ -50,17 +121,28 @@ def weibullCDF(x, gamma, k):
     k : float, required
         Shape parameter.
 
-    Returns
-    -------
-    y : numpy array
-        y-values of function.
+    Equations
+    ---------
+    **CDF**
+
+    .. math::
+        f(x) = 1 - \\exp( -(x / \\gamma)^k )
+
+    **Quantile**
+
+    .. math::
+        f(y) = \\gamma (-\\ln(1-y))^{1/k}
     """
-    y = np.zeros_like(x, dtype=float)
-    y[x>=0] = 1 - np.exp(-(x[x>=0]/gamma)**k)
-    return y
+    @staticmethod
+    def cdf(x, gamma, k):
+        return scipy.stats.weibull_min.cdf(x, c=k, scale=gamma)
+
+    @staticmethod
+    def quantile(y, gamma, k):
+        return scipy.stats.weibull_min.ppf(y, c=k, scale=gamma)
 
 
-##### Class definitions #####
+##### Curve fitting classes #####
 
 class BaseFitFunction(object):
     """
@@ -124,7 +206,7 @@ class BaseFitFunction(object):
     additionally assign self.y attribute - an array containing values for
     outcome variable.
     """
-    def __init__(self, func=stats.norm.cdf, invfunc=stats.norm.ppf,
+    def __init__(self, func=Gaussian.cdf, invfunc=Gaussian.quantile,
                  fit_method='mle', ymin=0, lapse=0):
 
         # Error check
@@ -392,7 +474,7 @@ class FitFunction(BaseFitFunction):
     """
     __doc__ += BaseFitFunction.__doc__
 
-    def __init__(self, x, y, mle_costfunc=stats.norm.pdf, *args, **kwargs):
+    def __init__(self, x, y, mle_costfunc=scipy.stats.norm.pdf, *args, **kwargs):
         self.x = np.asarray(list(x))
         self.y = np.asarray(list(y))
         self.mle_costfunc = mle_costfunc
@@ -479,7 +561,7 @@ class MLEBinomFitFunction(BaseFitFunction):
 
     >>> interpX, interpY = fit.doInterp()
     >>> plt.figure()
-    >>> plt.plot(interpX, stats.norm.cdf(interpX, true_mu, true_sigma),
+    >>> plt.plot(interpX, scipy.stats.norm.cdf(interpX, true_mu, true_sigma),
     ...          'k-', label='True fit')
     >>> plt.plot(x, list(map(np.mean, responses)), 'bo', label='Mean response')
     >>> plt.plot(interpX, interpY, 'r--', label='MLE fit')
@@ -505,4 +587,5 @@ class MLEBinomFitFunction(BaseFitFunction):
         Params should be for the objective function.
         """
         p = self.func(self.x, *params)
-        return -np.log(stats.binom.pmf(self.counts, self.n, p).clip(min=1e-10)).sum()
+        L = scipy.stats.binom.pmf(self.counts, self.n, p)
+        return -np.log(L.clip(min=1e-10)).sum()
