@@ -43,7 +43,7 @@ def data2cifti(data, template, cifti_type=None, axis_kwargs={}):
     axis_kwargs : dict
         Dictionary of keyword arguments to pass to axis class for the specified
         CIFTI data type. See nibabel documention for possible options. Ignored
-        if cifti_type is None.
+        if cifti_type is None or an instance of a Axis class.
 
     Returns
     -------
