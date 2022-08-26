@@ -290,6 +290,7 @@ class MultiSurfaceParcellation(object):
                 np.unique(self.annot_labels, return_inverse=True)
 
         # Update internal fields
+        self.nVertices = len(self.annot_labels)
         self.nParcels = len(self.unique_labels)
         self._is_fitted = True
 
@@ -376,7 +377,7 @@ class MultiSurfaceParcellation(object):
             arrays).
 
         dtype : valid datatype
-            Datatype to cast data to (default = float654)
+            Datatype to cast data to (default = float64)
 
         return_as_mgh: bool
             If True (default), return result as MGHImage object. If False,
