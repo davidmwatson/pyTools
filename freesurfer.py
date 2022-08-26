@@ -389,19 +389,16 @@ class MultiSurfaceParcellation(object):
             Data reshaped to full set of surface vertices. Returned as MGHImage
             object if return_as_mgh is True, otherwise returned as array.
         """
-        # Get total number of surface vertices
-        nVertices = len(self.annot_labels)
-
         # Inverse transform array
         new_array = array[..., self.inverse_annot_indices].T
 
         if self.invalid_label_IDs is not None:
             tmp = new_array.copy()
             if array.ndim == 1:
-                new_array = np.full(nVertices, np.nan)
+                new_array = np.full(self.nVertices, np.nan)
             else:
                 nSamples = array.shape[0]
-                new_array = np.full([nVertices, nSamples], np.nan)
+                new_array = np.full([self.nVertices, nSamples], np.nan)
             new_array[self.valid_indices, ...] = tmp
             del tmp
 
