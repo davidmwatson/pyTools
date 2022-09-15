@@ -8,6 +8,17 @@ import os
 import numpy as np
 import nibabel as nib
 
+# Workaround for pickling error affecting nibabel, caused by bug in older
+# versions of indexed_gzip
+# https://github.com/pauldmccarthy/indexed_gzip/issues/28
+# https://github.com/nipy/nibabel/issues/969#issuecomment-729206375
+from packaging.version import parse as parse_version
+import indexed_gzip
+if parse_version(indexed_gzip.__version__) < parse_version('1.1.0'):
+    import gzip
+    nib.openers.HAVE_INDEXED_GZIP = False
+    nib.openers.IndexedGzipFile = gzip.GzipFile
+
 
 class QuickMasker(object):
     """
