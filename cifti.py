@@ -15,7 +15,7 @@ import nibabel as nib
 # Quick version check on nibabel
 from packaging.version import parse as parse_version
 if parse_version(nib.__version__) < parse_version('3.2.0'):
-    raise ImportError('Nibabel verison must be >= 3.2.0')
+    raise ImportError('Nibabel version must be >= 3.2.0')
 
 
 def data2cifti(data, template, cifti_type=None, axis_kwargs={}):
