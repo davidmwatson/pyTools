@@ -196,8 +196,8 @@ affine = img.affine
 
 # Apply mask if provided
 if initial_mask is not None:
-	maskvol = nib.load(initial_mask).get_data().astype(bool)
-	vol *= maskvol
+    maskvol = nib.load(initial_mask).get_fdata().astype(bool)
+    vol *= maskvol
 
 # Check lower bound appropriate for seed
 if (lower_bound is not None) and (vol[tuple(seed_coord)] < lower_bound):
