@@ -154,7 +154,7 @@ parser.add_argument('-m', '--initial-mask',
                     help='Path to mask to apply before clustering')
 parser.add_argument('--start-thr', nargs='+', default=['25%','50%','75%'],
                     help='Starting threshold(s) for optimisation')
-parser.add_argument('--lower-bound', type=float, default=1.96,
+parser.add_argument('--lower-bound', type=float, default=1.64,
                     help='Lower-bound threshold; set to inf or nan to disable')
 parser.add_argument('--upper-bound', type=float, default='nan',
                     help='Upper-bound threshold; set to inf or nan to disable')
