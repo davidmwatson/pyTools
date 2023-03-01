@@ -12,12 +12,16 @@ import nibabel as nib
 # versions of indexed_gzip
 # https://github.com/pauldmccarthy/indexed_gzip/issues/28
 # https://github.com/nipy/nibabel/issues/969#issuecomment-729206375
-from packaging.version import parse as parse_version
-import indexed_gzip
-if parse_version(indexed_gzip.__version__) < parse_version('1.1.0'):
-    import gzip
-    nib.openers.HAVE_INDEXED_GZIP = False
-    nib.openers.IndexedGzipFile = gzip.GzipFile
+try:
+    import indexed_gzip
+except ImportError:
+    pass
+else:
+    from packaging.version import parse as parse_version
+    if parse_version(indexed_gzip.__version__) < parse_version('1.1.0'):
+        import gzip
+        nib.openers.HAVE_INDEXED_GZIP = False
+        nib.openers.IndexedGzipFile = gzip.GzipFile
 
 
 class QuickMasker(object):
@@ -97,7 +101,7 @@ class QuickMasker(object):
 
         Arguments
         ---------
-        img : str, Nifti1Image object, ndarray, or list thereof
+        imgs : str, Nifti1Image object, ndarray, or list thereof
             Input data. Can be path(s) to a NIFTI file, nibabel Nifti1Image
             object(s), or 3/4D numpy array(s) containing data values.
 
@@ -115,7 +119,10 @@ class QuickMasker(object):
         -------
         data : 1D or 2D ndarray
             Masked data, provided as an [nVoxels] 1D array if input is 3D,
-            or an [nSamples x nVoxels] 2D array if input is 4D.
+            or an [nSamples x nVoxels] 2D array if input is 4D. If multiple
+            inputs are provided, will be a list of each result if vstack is
+            False, or an array concatenating the results over the samples
+            axis if vstack is True.
         """
         # Setup
         self._check_is_fitted()
