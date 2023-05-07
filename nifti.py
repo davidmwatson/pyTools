@@ -39,7 +39,7 @@ class QuickMasker(object):
     mask2 : str, NiftiImage object, or None
         Only used if .[inverse_]transform() methods are called with invert_mask
         set to True. If supplied, will cause this to take only voxels from
-        this secondary mask that don't overlap with the primary mask2. If
+        this secondary mask that don't overlap with the primary mask. If
         omitted, will take voxels from whole volume outside the primary mask.
     """
     def __init__(self, mask, mask2=None):
@@ -202,6 +202,8 @@ class QuickMasker(object):
                     inv_data, affine=self.mask_img.affine,
                     header=self.mask_img.header, extra=self.mask_img.extra
                     )
+            new_img.header.set_data_dtype(dtype)
+            new_img.update_header()
             return new_img
         else:
             return inv_data
