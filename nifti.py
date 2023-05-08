@@ -154,7 +154,8 @@ class QuickMasker(object):
         return self.transform(*args, **kwargs)
 
     def inverse_transform(self, data, invert_mask=False, dtype=np.float32,
-                          return_as_nii=True):
+                          return_as_nii=True, header=None, affine=None,
+                          extra=None):
         """
         "Unmask" data array
 
@@ -173,6 +174,19 @@ class QuickMasker(object):
         return_as_nii : bool
             If True (default), return as Nifti1Image object. If False, return
             numpy array.
+
+        header : Nifti1Header or None
+            Header information for NIFTI. If None, will take from mask. Note
+            that header datatype will always be updated to match specified
+            dtype. Ignored if return_as_nii is False.
+
+        affine : 2D array or None
+            Affine information for NIFTI. If None, will take from mask. Ignored
+            if return_as_nii is False.
+
+        extra : dict or None
+            Extra metadata for NIFTI. If None, will take from mask. Ignored if
+            return_as_nii is False.
 
         Returns
         -------
@@ -198,12 +212,20 @@ class QuickMasker(object):
 
         # Convert to NiftiImage if requested, and return
         if return_as_nii:
-            new_img = nib.Nifti1Image(
-                    inv_data, affine=self.mask_img.affine,
-                    header=self.mask_img.header, extra=self.mask_img.extra
-                    )
-            new_img.header.set_data_dtype(dtype)
+            if header is None:
+                header = self.mask_img.header.copy()
+            if affine is None:
+                affine = self.mask_img.affine.copy()
+            if extra is None:
+                extra = self.mask_img.extra.copy()
+
+            header.set_data_dtype(dtype)
+
+            new_img = nib.Nifti1Image(inv_data, affine, header, extra)
             new_img.update_header()
+
             return new_img
+
         else:
             return inv_data
+
