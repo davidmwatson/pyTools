@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Various tools for handling surface files.
+Updated version of CIFTI tools. Simplifies masker by removing ability to
+invert mask, while also adding some new functionality such as selecting
+specific label IDs or using CIFTI structures as masks.
 
 Requires nibabel >= v3.2, which isn't currently installed at YNiC. You might
 need to pip install it yourself:
 pip3 install --user --upgrade nibabel==3.2
 """
 
-import os, warnings, inspect
+import os, warnings, inspect, copy
 import numpy as np
 import nibabel as nib
 
@@ -18,7 +20,7 @@ if parse_version(nib.__version__) < parse_version('3.2.0'):
     raise ImportError('Nibabel version must be >= 3.2.0')
 
 
-def data2cifti(data, template, cifti_type=None, axis_kwargs={}):
+def data2cifti(data, template, dtype=None, cifti_type=None, axis_kwargs={}):
     """
     Construct new Cifti2Image object from data array.
 
@@ -29,8 +31,11 @@ def data2cifti(data, template, cifti_type=None, axis_kwargs={}):
 
     template : nibabel.Cifti2Image
         Existing CIFTI image object to use as template. Should provide correct
-        information for the grayordinates axis, plus any necessary details
-        for the NIFTI header and extra information.
+        information for the columns axis, plus any necessary details for the
+        NIFTI header and extra information.
+
+    dtype : None or valid datatype
+        Datatype to cast data to. If None (default), use existing datatype.
 
     cifti_type : None, str, or nibabel.cifti2.Axis class
         If provided, specifies a data type for the CIFTI image. Valid options
@@ -74,11 +79,18 @@ def data2cifti(data, template, cifti_type=None, axis_kwargs={}):
         ax1 = template.header.get_axis(1)
         header = nib.cifti2.Cifti2Header.from_axes([ax0, ax1])
 
+    # Check dtype
+    if dtype is None:
+        dtype = data.dtype
+    else:
+        data = data.astype(dtype)
+
     # Create new CIFTI object
     new_cifti = nib.Cifti2Image(dataobj=data, header=header,
                                 nifti_header=template.nifti_header,
                                 extra=template.extra)
     new_cifti.update_headers()  # fixes nifti_header
+    new_cifti.nifti_header.set_data_dtype(dtype)
 
     # Return
     return new_cifti
@@ -103,24 +115,19 @@ class CiftiHandler(object):
         CIFTI file. If True, return all vertices for full surface, setting any
         missing vertices to zero (typically just the medial wall).
 
-    exclude_volume_structures : list
-        List of volume structure labels to exclude from data. Can specify as
-        full names (e.g. 'CIFTI_STRUCTURE_BRAIN_STEM') or short names
-        (e.g. 'brain_stem') that can be matched to full names.
-
     Methods
     -------
-    .get_volume_data : Extract volume data
-    .get_surface_data : Extract surface data for a given hemisphere
-    .get_all_data : Convenience function for extracting surface and volume data
-    .create_new_cifti : Create new CIFTI image from provided data
+    * get_volume_data : Extract volume data
+    * get_surface_data : Extract surface data for a given hemisphere
+    * get_all_data : Convenience function for extracting surface and volume data
+    * create_new_cifti : Create new CIFTI image from provided data
 
     """
-    def __init__(self, img, full_surface=False, exclude_volume_structures=[]):
+    def __init__(self, img, full_surface=False):
         # Load cifti
         if isinstance(img, nib.Cifti2Image):
             self.cifti = img
-        elif isinstance(img, str) and os.path.isfile(img):
+        elif os.path.isfile(img):
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
                 self.cifti = nib.load(img)
@@ -132,7 +139,6 @@ class CiftiHandler(object):
 
         # Assign remaining args to class
         self.full_surface = full_surface
-        self.exclude_volume_structures = exclude_volume_structures
 
     def _get_struct_info(self, struct_name):
         """
@@ -151,14 +157,9 @@ class CiftiHandler(object):
 
     def _get_volume_mask(self):
         """
-        Return copy of volume mask, first removing any requested structures
+        Return copy of volume mask
         """
-        vol_mask = self.axis1.volume_mask.copy()
-        if np.any(vol_mask):  # only check excluded structures if volume exists
-            for struct_name in self.exclude_volume_structures:
-                indices = self._get_struct_info(struct_name)[0]
-                vol_mask[indices] = False
-        return vol_mask
+        return self.axis1.volume_mask.copy()
 
     def _get_surface_mask(self):
         """
@@ -166,10 +167,9 @@ class CiftiHandler(object):
         """
         return self.axis1.surface_mask.copy()
 
-    def get_all_data(self, dtype=None, squeeze_data=True):
+    def get_all_data(self, dtype=None, squeeze_data=False):
         """
-        Return full data array from all available surface and volume
-        structures.
+        Return full data array from all available surface and volume blocks.
 
         Parameters
         ----------
@@ -177,13 +177,14 @@ class CiftiHandler(object):
             Datatype to cast data to. If None (default), use existing datatype.
 
         squeeze_data : bool
-            If True (default), squeeze singleton dimensions from data array.
+            If True, squeeze singleton dimensions from data array. Default is
+            False.
 
         Returns
         -------
         data : dict
             Dictionary of [samples x grayordinates] arrays containing data
-            values for each structure ('lh' for left surface, 'rh' for right
+            values for each block ('lh' for left surface, 'rh' for right
             surface, and 'volume' for sub-cortical structures)
         """
         data = {
@@ -193,9 +194,9 @@ class CiftiHandler(object):
             }
         return data
 
-    def get_volume_data(self, dtype=None, squeeze_data=True):
+    def get_volume_data(self, dtype=None, squeeze_data=False):
         """
-        Return all data from sub-cortical volume structures.
+        Return all data from volume block.
 
         Arguments
         ---------
@@ -203,7 +204,8 @@ class CiftiHandler(object):
             Datatype to cast data to. If None (default), use existing datatype.
 
         squeeze_data : bool
-            If True (default), squeeze singleton dimensions from data array.
+            If True, squeeze singleton dimensions from data array. Default is
+            False.
 
         Returns
         -------
@@ -228,7 +230,7 @@ class CiftiHandler(object):
         # Return
         return vol_data
 
-    def get_surface_data(self, hemi, dtype=None, squeeze_data=True):
+    def get_surface_data(self, hemi, dtype=None, squeeze_data=False):
         """
         Return all data from given hemisphere.
 
@@ -241,7 +243,8 @@ class CiftiHandler(object):
             Datatype to cast data to. If None (default), use existing datatype.
 
         squeeze_data : bool
-            If True (default), squeeze singleton dimensions from data array
+            If True, squeeze singleton dimensions from data array. Default is
+            False.
 
         Returns
         -------
@@ -293,7 +296,7 @@ class CiftiHandler(object):
         ----------
         [left/right]_surface_data, volume_data : ndarrays
             [nSamples x nGrayordinates] arrays giving data for left and right
-            surfaces and volume structures respectively. Any datasets that are
+            surfaces and volume blocks respectively. Any datasets that are
             omitted will be replaced with zeros.
 
         *args, **kwargs
@@ -369,277 +372,221 @@ class CiftiMasker(object):
 
     Arguments
     ---------
-    mask_img : str or CiftiHandler
-        Path to input mask (likely a dlabel CIFTI file), or a CiftiHandler
-        instance containing the mask data.
-
-    extra_mask_img : str, CiftiHandler, or None
-        Only used if .[inverse_]transform() methods are called with invert_mask
-        set to True. If supplied, will only invert mask within grayordinates
-        included within the extra mask. If None (default), will invert entire
-        mask.
-
-    exclude_volume_structures : list
-        List of volume structure labels to exclude from data. Can specify as
-        full names (e.g. 'CIFTI_STRUCTURE_BRAIN_STEM') or short names
-        (e.g. 'brain_stem') that can be matched to full names. Ignored if
-        images are supplied as CiftiHandler instances.
+    mask_img : str, Cifti2Image, or CiftiHandler
+        Path to input mask (likely a dlabel CIFTI file), long or short name
+        of a CIFTI structure (e.g. 'CIFTI_STRUCTURE_LEFT_HIPPOCAMPUS' or
+        'left hippocampus'), or Cifti2Image or CiftiHandler object containing
+        mask data.
 
     Methods
     -------
-    * .fit() : Load mask
-    * .transform() : Load dataset, applying mask
-    * .transform_multiple() : Load multiple datasets, applying mask
-    * .fit_transform[_multiple]() : Fit and transform in one go
-    * .inverse_transform() : Create new CIFTI image from masked data
+    * fit : Load mask
+    * transform() : Load dataset, applying mask
+    * transform_multiple : Load multiple datasets, applying mask
+    * fit_transform[_multiple] : Fit and transform in one go
+    * inverse_transform : Create new CIFTI image from masked data
+    * uncache : Clear cache
     """
-    def __init__(self, mask_img=None, extra_mask_img=None,
-                 exclude_volume_structures=[]):
-        # Allocate vars to class
+    def __init__(self, mask_img):
         self.mask_img = mask_img
-        self.extra_mask_img = extra_mask_img
-        self.exclude_volume_structures = exclude_volume_structures
-
-        # Place holders to be filled later
-        self.mask_handler = None
-        self.mask_dict = None
-        self.extra_mask_handler = None
-        self.extra_mask_dict = None
-        self.data_handler = None
-
-    @staticmethod
-    def _parse_struct(struct):
-        """
-        Parse structure label, returning list in ['lh','rh','volume'] order
-        omitting levels as appropriate. Structs should be None, 'all',
-        'surface', 'lh', 'rh', or 'volume':
-            * If None or 'all' then return ['lh','rh','volume']
-            * If 'surface' then return ['lh','rh']
-            * If 'lh', 'rh', or 'volume' then return that value in a list
-        """
-        if struct not in [None, 'all', 'lh', 'rh', 'surface', 'volume']:
-            raise ValueError(f'Invalid structure: {struct}')
-
-        if struct in [None, 'all']:
-            return ['lh','rh','volume']
-        elif struct == 'surface':
-            return ['lh','rh']
-        else:
-            return [struct]
+        self._is_fitted = False
 
     def _check_is_fitted(self):
-        """
-        Check that fit method has been called (a mask has been loaded) and
-        error if not.
-        """
-        if self.mask_dict is None:
+        if not self._is_fitted:
             raise Exception('This instance is not fitted yet. '
                             'Call .fit method first.')
 
-    def _resample_masks_to_data(self, data_handler, mask_dict,
-                                mask_struct=None, data_struct=None):
+    def _resample_to_data(self, dict_, data_handler, block='all'):
         """
-        Resample masks in provided dict to match full data grayordinates and
-        concatenate into array over lh, rh, and volume (in that order)
-        """
-        # Parse structures
-        p_mask_structs = self._parse_struct(mask_struct)
-        p_data_structs = self._parse_struct(data_struct)
+        Re-sample full surface and volume arrays to just the gray-ordinates
+        that exist in the data CIFTI image. Concat over left/right surf and
+        volume blocks, replacing any omitted blocks with zeros.
 
-        # Pre-allocate list for mask structures
-        mask_array = []
+        dict_ : Dictionary returned by CiftiHandler.get_all_data
+        data_handler : CiftiHandler for data image
+        block : 'all', 'surface', 'lh', 'rh', or 'volume'
+        """
+        # Error check
+        if not any(X.size > 0 for X in dict_.values()):
+            raise ValueError('CIFTI does not contain any data structures')
+
+        # Pre-allocate list for structures
+        array = []
+
+        # Get dtype and number of samples from first available block - needed
+        # when allocating zeros for missing blocks
+        for X in dict_.values():
+            if X.size > 0:
+                nSamp = X.shape[0]
+                dtype = X.dtype
+                break
 
         # Left surface
-        if 'lh' in p_data_structs:
-            indices, model = data_handler._get_struct_info('cortex_left')
-            if 'lh' in p_mask_structs and mask_dict['lh'].size > 0:
-                mask_array.append(mask_dict['lh'][..., model.vertex])
-            else:
-                mask_array.append(
-                        np.zeros(indices.stop - indices.start, dtype=bool)
-                        )
+        model = data_handler._get_struct_info('cortex_left')[1]
+        if block in ['lh','surface','all'] and dict_['lh'].size > 0:
+            array.append(dict_['lh'][..., model.vertex])
+        else:
+            nVtx = len(model.vertex)
+            array.append(np.zeros([nSamp, nVtx], dtype))
 
         # Right surface
-        if 'rh' in p_data_structs:
-            indices, model = data_handler._get_struct_info('cortex_right')
-            if 'rh' in p_mask_structs and mask_dict['rh'].size > 0:
-                mask_array.append(mask_dict['rh'][..., model.vertex])
-            else:
-                mask_array.append(
-                        np.zeros(indices.stop - indices.start, dtype=bool)
-                        )
+        model = data_handler._get_struct_info('cortex_right')[1]
+        if block in ['rh','surface','all'] and dict_['rh'].size > 0:
+            array.append(dict_['rh'][..., model.vertex])
+        else:
+            nVtx = len(model.vertex)
+            array.append(np.zeros([nSamp, nVtx], dtype))
 
         # Volume
-        if 'volume' in p_data_structs:
-            if 'volume' in p_mask_structs and mask_dict['volume'].size > 0:
-                mask_array.append(mask_dict['volume'])
-            else:
-                vol_mask = data_handler._get_volume_mask()
-                mask_array.append(np.zeros(vol_mask.sum(), dtype=bool))
+        if block in ['volume','all'] and dict_['volume'].size > 0:
+            array.append(dict_['volume'])
+        else:
+            nVox = data_handler._get_volume_mask().sum()
+            array.append(np.zeros([nSamp, nVox], dtype))
 
-        # Concat & return
-        return np.hstack(mask_array)
+        # Concat arrays and return
+        return np.hstack(array)
 
-
-    def _get_mask_array(self, data_handler, mask_struct, data_struct,
-                        invert_mask):
+    def _parse_labelID(self, labelID, mapN):
         """
-        Helper function for getting mask array. Resamples to data
-        grayordinates, concats to array, and inverts if requested.
+        Get numeric ID from label name, or pass through if already numeric
         """
-        # Resample mask to data grayordinates
-        mask_array = self._resample_masks_to_data(
-            data_handler, self.mask_dict, mask_struct, data_struct
-            )
-
-        # Invert if requested. If extra mask supplied, re-mask the inverted
-        # mask by it.
-        if invert_mask:
-            mask_array = ~mask_array
-            if self.extra_mask_dict is not None:
-                extra_mask_array = self._resample_masks_to_data(
-                    data_handler, self.extra_mask_dict, mask_struct=None,
-                    data_struct=data_struct
-                    )
-                mask_array *= extra_mask_array
-
-        # Return
-        return mask_array
+        if isinstance(labelID, int):
+            return labelID
+        elif isinstance(labelID, str):
+            if not isinstance(self.mask_handler.axis0, nib.cifti2.LabelAxis):
+                raise TypeError('String label IDs only supported for dlabel masks')
+            matches = [k for k,v in self.mask_handler.axis0.label[mapN].items() \
+                       if v[0] == labelID]
+            if len(matches) != 1:
+                raise ValueError(f"No labels matching ID '{labelID}'")
+            return matches[0]
+        else:
+            raise TypeError('Invalid label ID type')
 
     def fit(self):
         """
-        Load mask, and extra mask (if provided).
+        Load mask
         """
-        # Load masks. Get full set of surface vertices - we'll resample to the
-        # data vertices later
-        if isinstance(self.mask_img, CiftiHandler):
-            self.mask_handler = self.mask_img
-        elif isinstance(self.mask_img, str) and os.path.isfile(self.mask_img):
-            self.mask_handler = CiftiHandler(
-                self.mask_img, full_surface=True,
-                exclude_volume_structures=self.exclude_volume_structures
-                )
-        else:
-            raise ValueError('Invalid mask image')
-
-        self.mask_dict = self.mask_handler.get_all_data(dtype=bool)
-        self.mask_handler.uncache()
-
-        if self.extra_mask_img is not None:
-            if isinstance(self.extra_mask_img, CiftiHandler):
-                self.extra_mask_handler = self.extra_mask_img
-            elif isinstance(self.extra_mask_img, str) \
-                 and os.path.isfile(self.extra_mask_img):
-                self.extra_mask_handler = CiftiHandler(
-                    self.extra_mask_img, full_surface=True,
-                    exclude_volume_structures=self.exclude_volume_structures
-                    )
+        # Select CIFTI structure, or load from file, or pass through objects
+        try:
+            self.mask_struct = nib.cifti2.BrainModelAxis \
+                                  .to_cifti_brain_structure_name(self.mask_img)
+            self._mask_is_cifti_struct = True
+        except ValueError:
+            if isinstance(self.mask_img, CiftiHandler):
+                self.mask_handler = copy.deepcopy(CiftiHandler)
+                self.mask_handler.full_surface = True
+            elif os.path.isfile(self.mask_img) \
+            or isinstance(self.mask_img, nib.Cifti2Image):
+                self.mask_handler = CiftiHandler(self.mask_img, full_surface=True)
             else:
-                raise ValueError('Invalid extra mask image')
+                raise ValueError('Invalid mask image')
 
-            self.extra_mask_dict = self.extra_mask_handler.get_all_data(dtype=bool)
-            self.extra_mask_handler.uncache()
+            self.mask_dict = self.mask_handler.get_all_data(dtype=int)
+            self._mask_is_cifti_struct = False
 
+        # Return
+        self._is_fitted = True
         return self
 
-    def transform(self, img, mask_struct=None, data_struct=None,
-                  invert_mask=False, dtype=np.float32):
+    def transform(self, img, mask_block='all', labelID=1, mapN=0, dtype=None):
         """
-        Load data from provided CIFTI file path, and return as
-        [nSamples x nGrayOrdinates] array after applying mask.
+        Load data from CIFTI and apply mask
 
         Arguments
         ---------
-        img : str or CiftiHandler
+        img : str, Cifti2Image, or CiftiHandler
             Path to CIFTI data file (likely a dscalar or dtseries), or a
-            CiftiHandler instance containing the data.
+            Cifti2Image or CiftiHandler object containing the data.
 
-        mask_struct : str { all | lh | rh | surface | volume } or None
-            Structure within CIFTI to apply mask to. If 'lh' or 'rh' will
-            apply to left or right cortical surfaces. If 'surface' will apply
-            to both left and right cortical surfaces. If 'volume' will apply
-            to sub-cortical volume. If None (default) or 'all', will apply to
-            all available grayordinates.
+        mask_block : str {all | lh | rh | surface | volume}
+            Which blocks from the CIFTI array to return data from. For example,
+            could use to select data from only one hemisphere. Ignored if mask
+            is a CIFTI structure. Default is 'all'.
 
-        data_struct : str { all | lh | rh | surface | volume } or None
-            Structure within CIFTI to extract data from. This is mostly useful
-            for selecting what structures to load data from when the mask is
-            inverted, e.g. setting invert_mask=True, mask_struct='lh', and
-            data_struct='surface' will load only surface data outside the left
-            hemisphere mask (i.e. excluding surface grayordinates within the
-            left hemisphere mask and all volume grayordinates). Note that when
-            not inverting the mask, if data and mask structures don't match
-            then no data may be returned.
+        labelID : int or str
+            ID of label to select if mask contains multiple labels. Can be
+            the numeric index of the label (technically 0-indexed, though 0
+            itself usually denotes unlabelled regions, so the first real label
+            will have probably be denoted as 1). If the mask is stored in a
+            dlabel file, can also be the name of the label. Ignored if mask is
+            a CIFTI structure. Default is 1.
 
-        invert_mask : bool
-            If True, return data for grayordinates OUTSIDE mask. Data will
-            still be restricted to extra_mask (if supplied).
+        mapN : int
+            Index of map to select if mask contains multiple maps. Ignored if
+            mask is a CIFTI structure. Default is 0 (first map).
 
-        dtype : valid datatype
-            Datatype to cast data to
+        dtype : None or valid datatype
+            Datatype to cast data to. If None (default), use existing datatype.
 
         Returns
         -------
         data_array : ndarray
-            [nSamples x nGrayordinates] array of data values after masking
+            [nSamples x nGrayOrdinates] array of data values after masking
         """
         # Error check
         self._check_is_fitted()
 
-        # Open handler for data file and allocate to class
+        # Open handler for data file
         if isinstance(img, CiftiHandler):
-            self.data_handler = img
-        elif isinstance(img, str) and os.path.isfile(img):
-            self.data_handler = CiftiHandler(
-                img, full_surface=False,
-                exclude_volume_structures=self.exclude_volume_structures
-                )
+            self.data_handler = copy.deepcopy(img)
+            self.data_handler.full_surface = True
+        elif os.path.isfile(img) or isinstance(img, nib.Cifti2Image):
+            self.data_handler = CiftiHandler(img, full_surface=True)
         else:
             raise ValueError('Invalid data image')
 
-        # Load data from all structures, concat over structures
-        data_dict = self.data_handler.get_all_data(dtype)
-        data_array = np.hstack(
-                [data_dict[S] for S in self._parse_struct(data_struct)]
-                )
+        # If mask is a CIFTI structure, index it out of data
+        if self._mask_is_cifti_struct:
+            slice_ = self.data_handler._get_struct_info(self.mask_struct)[0]
+            data_array = self.data_handler.cifti.get_fdata()[..., slice_]
+            if dtype is not None:
+                data_array = data_array.astype(dtype)
 
-        # Get mask array
-        mask_array = self._get_mask_array(self.data_handler, mask_struct,
-                                          data_struct, invert_mask)
+        # Mask not cifti structure - load mask array and apply to data
+        else:
+            # Extract mask and data arrays for requested structures
+            mask_array = self._resample_to_data(
+                    self.mask_dict, self.data_handler, mask_block
+                    )
 
-        # Apply mask to data
-        data_array = data_array[..., mask_array]
+            data_array = self._resample_to_data(
+                    self.data_handler.get_all_data(dtype), self.data_handler,
+                    mask_block
+                    )
 
-        # Uncache data
-        self.data_handler.uncache()
+            # Convert mask array to boolean mask matching requested label
+            mask_array = mask_array[mapN] == self._parse_labelID(labelID, mapN)
+
+            # Apply mask to data
+            data_array = data_array[..., mask_array]
 
         # Return
         return data_array
 
-    def transform_multiple(self, img_paths, vstack=False, *args, **kwargs):
+    def transform_multiple(self, imgs, vstack=False, *args, **kwargs):
         """
-        Convenience function for applying transform to multiple CIFTI files
+        Load data from multiple CIFTIs and apply mask
 
-        Arguments
-        ---------
-        img_paths : list
-            List of paths to CIFTI files or CiftiHandler instances
+        imgs : list of strs, Cifti2Images, or CiftiHandlers
+            List of input images
 
         vstack : bool
-            If True, stack masked data arrays before returning
+            If True, stack masked data arrays before returning. Default is
+            False.
 
         *args, **kwargs
-            Further arguments passed to .transform method
+            Further arguments passed to transform method
 
         Returns
         -------
-        data : list or ndarray
-            If <vstack> is False, then a list of [nSamples x nGrayordinates]
-            arrays of data values after masking for each input. If <vstack> is
-            True, then an [(nImgs * nSamples) x nGrayordinates] array.
+        data : ndarray or list of ndarrays
+            If vstack is True, then an [(nImgs * nSamples) x nGrayordinates]
+            array. If vstack is False, then an nImgs-length list of
+            [nSamples x nGrayordinates] arrays.
         """
-        self._check_is_fitted()
-        data = [self.transform(img, *args, **kwargs) for img in img_paths]
+        data = [self.transform(img, *args, **kwargs) for img in imgs]
         if vstack:
             data = np.vstack(data)
         return data
@@ -652,61 +599,59 @@ class CiftiMasker(object):
         self.fit()
         return self.transform_multiple(*args, **kwargs)
 
-    def inverse_transform(self, data_array, mask_struct=None,
-                          data_struct=None, invert_mask=False, dtype=None,
-                          template_img=None, return_as_cifti=True,
-                          *args, **kwargs):
+    def inverse_transform(self, data_array, mask_block='all', labelID=1,
+                          mapN=0, dtype=None, template_img=None,
+                          return_as_cifti=True, *args, **kwargs):
         """
         "Unmask" data to return to original grayordinates array using provided
         CIFTI image as a template.
 
         Arguments
         ---------
-        data_array : numpy array
+        data_array : ndarray
             [nGrayordinates, ] 1D array or [nSamples x nGrayordinates] 2D
             array containing masked data.
 
-        mask_struct : str { lh | rh | surface | volume } or None
-            Structure within CIFTI that mask was applied to. Must match the
-            option that was used during initial forward transformation (see
-            .transform method).
+        mask_block : str {all | lh | rh | surface | volume}
+            Which blocks from the CIFTI array to return data from. Should
+            match value supplied to forward transform.
 
-        data_struct : str { lh | rh | surface | volume } or None
-            Structure within CIFTI that data was extracted from. Much match
-            the option was used during initial forward transformation (see
-            .transform method).
+        labelID : int or str
+            ID or name of label to select if mask contains multiple labels.
+            Should match value supplied to forward transform.
 
-        invert_mask : boolean
-            Use inverted version of whole mask. Must match option that was
-            used during initial forward transformation of data (see
-            .transform method).
+        mapN : int
+            Index of map to select if mask contains multiple maps. Should match
+            value supplied to forward transform.
 
-        dtype : valid datatype
-            Datatype to convert data to. If None (default), use existing type.
+        dtype : None or valid datatype
+            Datatype to cast data to. If None (default), use existing datatype.
 
-        template_img : str, CiftiHandler, or None
-            Filepath to template CIFTI, or CiftiHandler instance to be used as
-            template. Used to determine grayordinates and extract header
-            information. If None (default) can use details from previously
-            transformed CIFTI handler (provided that .transform method has
-            already been called).
+        template_img : None, str, Cifti2Image, or CiftiHandler
+            Template to base new CIFTI on. If None (default) will use data
+            CIFTI handler from most recent forward transform. Otherwise, can
+            be path to data CIFTI file, or Cifti2Image or CiftiHandler object
+            containing data.
 
         return_as_cifti : bool
-            If True (default), return result as Cifti2Image object. If False,
-            return data as numpy array.
+            If True (default), return new Cifti2Image object. Otherwise,
+            return numpy array.
 
         *args, **kwargs
-            Additional arguments are passed to data2cifti function if
-            return_as_cifti is True, or are ignored otherwise.
+            Additional arguments passed to data2cifti function.
 
         Returns
         -------
-        new_data : nibabel.Cifti2Image or ndarray
+        new_data : Cifti2Image or ndarray
             Data reshaped to full set of grayordinates. Returned as Cifti2Image
             object if return_as_cifti is True, otherwise returned as array.
         """
         # Error check
         self._check_is_fitted()
+
+        # Check dtype
+        if dtype is None:
+            dtype = data_array.dtype
 
         # Load template CIFTI
         if template_img is None:
@@ -716,57 +661,47 @@ class CiftiMasker(object):
             else:
                 template_handler = self.data_handler
         elif isinstance(template_img, CiftiHandler):
-            template_handler = template_img
-        elif isinstance(template_img, str) and os.path.isfile(template_img):
-            template_handler = CiftiHandler(template_img)
+            template_handler = copy.deepcopy(template_img)
+            template_handler.full_surface = True
+        elif os.path.isfile(template_img) \
+        or isinstance(template_img, nib.Cifti2Image):
+            template_handler = CiftiHandler(template_img, full_surface=True)
         else:
             raise ValueError('Invalid template image')
 
         # Ensure data array 2D
         data_array = np.atleast_2d(data_array)
 
-        # Calculate final data shape
-        n_samples = data_array.shape[0]
-        n_grayordinates = template_handler.axis1.size
+        # Get dimensions and allocate new array
+        nSamples = data_array.shape[0]
+        nOrds = template_handler.axis1.size
+        new_array = np.zeros([nSamples, nOrds], dtype=dtype)
 
-        # Get mask array
-        mask_array = self._get_mask_array(
-                template_handler, mask_struct, data_struct=None,
-                invert_mask=invert_mask
-                )
-
-        # If any volume structures were excluded, we need to add them back in
-        if self.exclude_volume_structures:
-            surf_mask = template_handler._get_surface_mask()
-            vol_mask = template_handler._get_volume_mask()
-            idcs = surf_mask | vol_mask
-            tmp_mask_array = np.zeros(n_grayordinates, dtype=bool)
-            tmp_mask_array[idcs] = mask_array
-            mask_array = tmp_mask_array
-            del tmp_mask_array
-
-        # If data excludes any general structures, we need to exclude them
-        # from the corresponding mask
-        if data_struct:
-            p_data_structs = self._parse_struct(data_struct)
-            if 'lh' not in p_data_structs:
-                indices = template_handler._get_struct_info('cortex_left')[0]
-                mask_array[indices] = False
-            if 'rh' not in p_data_structs:
-                indices = template_handler._get_struct_info('cortex_right')[0]
-                mask_array[indices] = False
-            if 'volume' not in p_data_structs:
-                indices = template_handler._get_volume_mask()
-                mask_array[indices] = False
-
-        # Resample data to new array
-        new_array = np.zeros([n_samples, n_grayordinates], dtype=dtype)
-        new_array[..., mask_array] = data_array
+        # If mask is a CIFTI structure, allocate into its indices
+        if self._mask_is_cifti_struct:
+            slice_ = template_handler._get_struct_info(self.mask_struct)[0]
+            new_array[..., slice_] = data_array
+        # Mask not CIFTI structure - get mask array and allocate by it
+        else:
+            mask_array = self._resample_to_data(
+                    self.mask_dict, template_handler, mask_block
+                    )
+            mask_array = mask_array[mapN] == self._parse_labelID(labelID, mapN)
+            new_array[..., mask_array] = data_array
 
         # Return requested output
         if return_as_cifti:
-            new_cifti = data2cifti(new_array, template_handler.cifti,
-                                   *args, **kwargs)
-            return new_cifti
+            new_img = data2cifti(new_array, template_handler.cifti, dtype,
+                                 *args, **kwargs)
+            return new_img
         else:
             return new_array
+
+    def uncache(self):
+        """
+        Clear mask and data from cache
+        """
+        self._check_is_fitted()
+        if not self._mask_is_cifti_struct:
+            self.mask_handler.uncache()
+        self.data_handler.uncache()
