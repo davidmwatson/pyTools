@@ -127,7 +127,7 @@ class CiftiHandler(object):
         # Load cifti
         if isinstance(img, nib.Cifti2Image):
             self.cifti = img
-        elif os.path.isfile(img):
+        elif isinstance(img, str) and os.path.isfile(img):
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
                 self.cifti = nib.load(img)
@@ -477,7 +477,7 @@ class CiftiMasker(object):
             if isinstance(self.mask_img, CiftiHandler):
                 self.mask_handler = copy.deepcopy(CiftiHandler)
                 self.mask_handler.full_surface = True
-            elif os.path.isfile(self.mask_img) \
+            elif (isinstance(self.mask_img, str) and os.path.isfile(self.mask_img)) \
             or isinstance(self.mask_img, nib.Cifti2Image):
                 self.mask_handler = CiftiHandler(self.mask_img, full_surface=True)
             else:
@@ -532,7 +532,8 @@ class CiftiMasker(object):
         if isinstance(img, CiftiHandler):
             self.data_handler = copy.deepcopy(img)
             self.data_handler.full_surface = True
-        elif os.path.isfile(img) or isinstance(img, nib.Cifti2Image):
+        elif (isinstance(img, str) and os.path.isfile(img)) \
+        or isinstance(img, nib.Cifti2Image):
             self.data_handler = CiftiHandler(img, full_surface=True)
         else:
             raise ValueError('Invalid data image')
@@ -663,7 +664,7 @@ class CiftiMasker(object):
         elif isinstance(template_img, CiftiHandler):
             template_handler = copy.deepcopy(template_img)
             template_handler.full_surface = True
-        elif os.path.isfile(template_img) \
+        elif (isinstance(template_img, str) and os.path.isfile(template_img)) \
         or isinstance(template_img, nib.Cifti2Image):
             template_handler = CiftiHandler(template_img, full_surface=True)
         else:
