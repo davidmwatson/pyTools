@@ -105,7 +105,7 @@ def get_fsl_cmap(cmap=None):
 
 
 def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, labelsize=32,
-              nticks=6, ticksize=24, tickpos=None, ticklabels=None,
+              nticks=6, ticks=None, ticksize=24, tickpos=None, ticklabels=None,
               font='sans-serif', fontcolor='black', ori='vertical',
               figsize=None, segmented=False, segment_interval=1):
     """
@@ -127,6 +127,8 @@ def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, labelsize=32,
         Fontsize for axis label
     nticks : int, optional
         Number of ticks to have on colorbar axis.
+    ticks : list of floats, optional
+        Exact values of ticks (overrides nticks)
     ticksize : int, optional
         Fontsize for ticks
     tickpos : str, optional
@@ -219,19 +221,21 @@ def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, labelsize=32,
     cb = mpl.colorbar.ColorbarBase(ax, cmap=cmap, norm=norm, orientation=ori)
 
     # Calculate & set tick intervals
-    intrange = np.linspace(vmin, vmax, nticks)
+    if ticks is None:
+        ticks = np.linspace(vmin, vmax, nticks)
+        # For a segmented colormap, the ticks will occur at the boundaries by
+        # default - we want them next to the segments themselves so we need to
+        # place half a segment_interval up
+        if segmented:
+            ticks += segment_interval/2
+    else:
+        ticks = np.asarray(ticks)
+
     if ori == 'vertical':
         cb.ax.yaxis.set_ticks_position(tickpos)
     else:
         cb.ax.xaxis.set_ticks_position(tickpos)
-    if segmented:
-        # For a segmented colormap, the ticks will occur at the boundaries by
-        # default - we want them next to the segments themselves so we need to
-        # place half a segment_interval up
-        cb.set_ticks(intrange + (segment_interval/2))
-    else:
-        # For a continuous colormap, just place them as they are
-        cb.set_ticks(intrange)
+    cb.set_ticks(ticks)
 
     # Assign requested ticklabels if provided, else format some default ones
     if ticklabels is not None:
@@ -239,7 +243,7 @@ def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, labelsize=32,
             raise ValueError('Number of ticklabels must match value of nticks')
         cb.set_ticklabels(ticklabels)
     else:
-        cb.set_ticklabels(['{:.{}f}'.format(x, dp) for x in intrange])
+        cb.set_ticklabels(['{:.{}f}'.format(x, dp) for x in ticks])
 
     # Define label from args
     if label is not None:
@@ -247,10 +251,10 @@ def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, labelsize=32,
 
     # Loop through ticks and adjust font size & color
     if ori == 'vertical':
-        ticks = cb.ax.get_yticklabels()
+        labs = cb.ax.get_yticklabels()
     else:
-        ticks = cb.ax.get_xticklabels()
-    for t in ticks:
+        labs = cb.ax.get_xticklabels()
+    for t in labs:
         t.set_family(font)
         t.set_fontsize(ticksize)
         t.set_color(fontcolor)
