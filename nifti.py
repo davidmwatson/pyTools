@@ -60,7 +60,7 @@ class QuickMasker(object):
         else:
             raise TypeError('Mask must be valid filepath or Nifti1Image object')
 
-        mask_array = mask_img.get_fdata().astype(bool)
+        mask_array = mask_img.get_fdata().astype(int)
         mask_img.uncache()
 
         return mask_img, mask_array
@@ -95,7 +95,8 @@ class QuickMasker(object):
         self._is_fitted = True
         return self
 
-    def transform(self, imgs, invert_mask=False, vstack=False, dtype=np.float64):
+    def transform(self, imgs, labelID=None, invert_mask=False, vstack=False,
+                  dtype=np.float64):
         """
         Load data from imgfile and apply mask.
 
@@ -104,6 +105,10 @@ class QuickMasker(object):
         imgs : str, Nifti1Image object, ndarray, or list thereof
             Input data. Can be path(s) to a NIFTI file, nibabel Nifti1Image
             object(s), or 3/4D numpy array(s) containing data values.
+
+        labelID : int or None
+            Numeric value of label within mask to use, in case multiple labels
+            contained within mask. If None (default), use all non-zero labels.
 
         invert_mask : bool
             If True, load from vertices OUTSIDE of mask instead
@@ -130,15 +135,18 @@ class QuickMasker(object):
         if not isinstance(imgs, (tuple, list)):
             imgs = [imgs]
 
-        if invert_mask:
-            mask_array = ~self.mask_array
-            if self.mask_array2 is not None:
-                mask_array = mask_array & self.mask_array2
+        if labelID is None:
+            mask = self.mask_array.astype(bool)
         else:
-            mask_array = self.mask_array
+            mask = self.mask_array == labelID
+
+        if invert_mask:
+            mask = ~mask
+            if self.mask_array2 is not None:
+                mask = mask & self.mask_array2.astype(bool)
 
         # Load data for each image and apply mask
-        data = [self._load_data(img, dtype)[mask_array].T for img in imgs]
+        data = [self._load_data(img, dtype)[mask].T for img in imgs]
 
         # Stack data over images?
         if vstack:
