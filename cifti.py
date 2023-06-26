@@ -447,6 +447,15 @@ class CiftiMasker(object):
         # Concat arrays and return
         return np.hstack(array)
 
+    def _parse_mapN(self, mapN):
+        """
+        Get numeric index from map name, or pass through if already numeric
+        """
+        if isinstance(mapN, int):
+            return mapN
+        elif isinstance(mapN, str):
+            return self.mask_handler.axis0.name.tolist().index(mapN)
+
     def _parse_labelID(self, labelID, mapN):
         """
         Get numeric ID from label name, or pass through if already numeric
@@ -513,9 +522,10 @@ class CiftiMasker(object):
             dlabel file, can also be the name of the label. Ignored if mask is
             a CIFTI structure. Default is 1.
 
-        mapN : int
-            Index of map to select if mask contains multiple maps. Ignored if
-            mask is a CIFTI structure. Default is 0 (first map).
+        mapN : int or str
+            Index of map to select if mask contains multiple maps. Can be
+            numeric index (0-indexed) or map name. Ignored if mask is a CIFTI
+            structure. Default is 0.
 
         dtype : None or valid datatype
             Datatype to cast data to. If None (default), use existing datatype.
@@ -558,6 +568,7 @@ class CiftiMasker(object):
                     )
 
             # Convert mask array to boolean mask matching requested label
+            mapN = self._parse_mapN(mapN)
             mask_array = mask_array[mapN] == self._parse_labelID(labelID, mapN)
 
             # Apply mask to data
@@ -621,9 +632,10 @@ class CiftiMasker(object):
             ID or name of label to select if mask contains multiple labels.
             Should match value supplied to forward transform.
 
-        mapN : int
-            Index of map to select if mask contains multiple maps. Should match
-            value supplied to forward transform.
+        mapN : int or str
+            Index of map to select if mask contains multiple maps. Can be
+            numeric index (0-indexed) or map name. Ignored if mask is a CIFTI
+            structure. Default is 0.
 
         dtype : None or valid datatype
             Datatype to cast data to. If None (default), use existing datatype.
@@ -687,6 +699,7 @@ class CiftiMasker(object):
             mask_array = self._resample_to_data(
                     self.mask_dict, template_handler, mask_block
                     )
+            mapN = self._parse_mapN(mapN)
             mask_array = mask_array[mapN] == self._parse_labelID(labelID, mapN)
             new_array[..., mask_array] = data_array
 
