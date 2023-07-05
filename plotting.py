@@ -230,6 +230,7 @@ def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, labelsize=32,
             ticks += segment_interval/2
     else:
         ticks = np.asarray(ticks)
+        nticks = len(ticks)
 
     if ori == 'vertical':
         cb.ax.yaxis.set_ticks_position(tickpos)
