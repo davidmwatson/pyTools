@@ -204,12 +204,12 @@ class QuickMasker(object):
         # Setup
         self._check_is_fitted()
 
+        mask_array = self.mask_array.astype(bool)
+
         if invert_mask:
             mask_array = ~self.mask_array
             if self.mask_array2 is not None:
-                mask_array = mask_array & self.mask_array2
-        else:
-            mask_array = self.mask_array
+                mask_array = mask_array & self.mask_array2.astype(bool)
 
         # Allocate new array and populate mask region with data
         dims = list(self.mask_img.shape)
