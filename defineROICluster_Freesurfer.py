@@ -165,7 +165,8 @@ def mri_surfcluster(thr, subjects_dir, subject, hemi, surf, infile,
     Arguments
     ---------
     thr : float
-        Threshold to apply
+        Threshold to apply. NOTE: negative values will be clipped to zero
+        because mri_surfcluster requires threshold to be non-negative.
     subjects_dir : str
         Path to Freesurfer subjects directory
     subject : str
@@ -193,6 +194,11 @@ def mri_surfcluster(thr, subjects_dir, subject, hemi, surf, infile,
     * cluster_summary.txt - Summary text file, includes cluster table
     * cluster-????.label - Labels for each cluster (if save_labels==True)
     """
+    # Clip threshold to be non-negative
+    # TODO: would be better to do this via bounds in minimize function call,
+    # but current version of scipy doesn't yet support bounds for Nelder-Mead
+    thr = max(0, thr)
+
     # Build command args
     cmd = ['mri_surfcluster',
            '--hemi', hemi,
