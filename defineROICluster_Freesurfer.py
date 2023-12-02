@@ -105,6 +105,31 @@ from scipy.optimize import minimize
 
 ### Custom funcs ###
 
+
+def my_subprocess_run(*args, **kwargs):
+    """
+    Wrapper around subprocess.run that includes stderr stream in any error
+    messages. All arguments as per subprocess.run, except `check` which is
+    forced to False (function checks return code itself) and `capture_output`
+    which is forced to True.
+    """
+    kwargs['check'] = False
+    kwargs['capture_output'] = True
+
+    rtn = subprocess.run(*args, **kwargs)
+
+    if rtn.returncode:
+        msg = f"Command '{rtn.args}' returned non-zero exit status {rtn.returncode:d}."
+        stderr = rtn.stderr
+        if stderr:
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode()
+            msg += f'\n\n{stderr.strip()}'
+        raise OSError(msg)
+
+    return rtn
+
+
 def RAS_to_vertex(subjects_dir, subject, hemi, vtx_coord):
     """
     Get index of closest vertex to surfaceRAS co-ordinate.
@@ -185,7 +210,7 @@ def mri_surfcluster(thr, subjects_dir, subject, hemi, surf, infile,
         cmd.extend(['--olab', os.path.join(clusterdir, 'cluster')])
 
     # Run command
-    subprocess.run(cmd, check=True, capture_output=True)
+    my_subprocess_run(cmd)
 
 
 def get_cluster_at_vertex(clusterdir, vertex):
