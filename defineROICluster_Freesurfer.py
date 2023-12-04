@@ -181,7 +181,6 @@ def mri_surfcluster(thr, subjects_dir, subject, hemi, surf, infile,
         Path to directory to save outputs. Must already exist.
     sign : str
         abs, pos, or neg
-
     clabel : str (optional)
         Path to label file to apply as pre-mask
     save_labels : bool (optional)
@@ -448,7 +447,7 @@ for i, (seed_vertex, outfile) in enumerate(zip(seed_vertices, outfiles)):
     if lower_bound is not None:
         seed_val = surf_data[seed_vertex]
         if sign in ['pos','neg']:
-            seed_val -= np.log(2)
+            seed_val -= np.log10(2)
         if seed_val < lower_bound:
             raise ValueError('Lower bound cannot exceed value at seed voxel')
 
@@ -464,7 +463,7 @@ for i, (seed_vertex, outfile) in enumerate(zip(seed_vertices, outfiles)):
             min_ = lower_bound if lower_bound is not None else 0
             x0 = min_ + prop * (max_ - min_)
             if sign in ['pos','neg']:
-                x0 += np.log(2)
+                x0 += np.log10(2)
         else:
             x0 = float(x0)
 
