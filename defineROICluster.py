@@ -44,6 +44,11 @@ Arguments
     default is a lower bound of 1.64 (z-score giving one-tailed p < 0.05),
     and the upper bound is disabled.
 
+--negative
+    If specified, sign-flip the input volume so that the clustering is based
+    on the negative tail of the values (note that thresholds and bounds should
+    still be given in positive units).
+
 Example usage
 -------------
 Define 100 voxel cluster from zstat around seed at [10,20,30]
@@ -159,6 +164,8 @@ parser.add_argument('--lower-bound', type=float, default=1.64,
                     help='Lower-bound threshold; set to inf or nan to disable')
 parser.add_argument('--upper-bound', type=float, default='nan',
                     help='Upper-bound threshold; set to inf or nan to disable')
+parser.add_argument('--negative', action='store_true',
+                    help='Define cluster from negative values')
 
 # If no arguments given, print help and exit
 if not len(sys.argv) > 1:
@@ -175,6 +182,7 @@ initial_mask = args.initial_mask
 start_thresholds = args.start_thr
 lower_bound = args.lower_bound
 upper_bound = args.upper_bound
+negative = args.negative
 
 # Append outfile extension if none given
 if '.' not in outfile:
@@ -199,6 +207,10 @@ affine = img.affine
 if initial_mask is not None:
     maskvol = nib.load(initial_mask).get_fdata().astype(bool)
     vol *= maskvol
+
+# Sign-flip?
+if negative:
+    vol *= -1
 
 # Check lower bound appropriate for seed
 if (lower_bound is not None) and (vol[tuple(seed_coord)] < lower_bound):
