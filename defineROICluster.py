@@ -48,7 +48,8 @@ Example usage
 -------------
 Define 100 voxel cluster from zstat around seed at [10,20,30]
 
-> python3 defineROICluster.py -i  myZstat.nii.gz -n 100 -c 10 20 30
+> python3 defineROICluster.py -i  myZstat.nii.gz -n 100 -c 10 20 30 \\
+    -o myClusterMask.nii.gz
 
 As above, but also apply initial mask and increase lower bound to Z = 3.1
 
