@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
+
 """
 Script supports assorted image processing capabilities:
  * Phase scrambling (applyPhaseScram)
  * Applying soft windows (SoftWindowImage)
  * Making amplitude / phase image composites (combineAmplitudePhase)
- * Fourier filtering (FourierFilter)
+ * Fourier filtering (makeFourierFilter, applyFourierFilter)
+ * Make hybrid filtered images (makeHybridImage)
  * Making amplitude masks (makeAmplitudeMask)
- * Making average images (averageImages)
  * Overlaying a fixation cross on an image (overlayFixation)
  * Plotting average amplitude spectra (plotAverageAmpSpec)
 
@@ -20,28 +21,15 @@ other functions in this script:
  * butterworth - Returns a Butterworth transfer function
  * fwhm2sigma, sigma2fwhm - Converts between full-width-half-maximum and sigma
    values used for defining bandwidths for some filters (e.g. Gaussians)
-
-The script requires the following python libraries - you will need to download
-and install each of these:
- * numpy
- * scipy
- * Python Image Library (PIL) or Pillow
- * matplotlib (plotAverageAmpSpec only)
- * imageio (plotAverageAmpSpec only)
-
 """
 
 ### Import statements
-from __future__ import division
-import os, warnings
+import os, warnings, imageio
 import numpy as np
 from numpy import pi
 from numpy.fft import fft2, ifft2, fftshift, ifftshift
 import scipy.ndimage
-try:
-    import Image  # via PIL
-except ImportError:
-    from PIL import Image  # via pillow
+from PIL import Image
 
 
 ##### UTILITY FUNCTION DEFINITIONS #####
@@ -56,15 +44,19 @@ def imread(image, output_dtype=np.float64, pad_depth_channel=True,
     ----------
     image : valid filepath, PIL Image instance, or numpy array - required
         Image to be loaded.
+
     output_dtype : numpy dtype, optional
         Datatype to cast output array to. If None, datatype left unchanged.
+
     pad_depth_channel : bool, optional
         If True and image is grayscale, will pad a trailing dimension to
         maintain compatibility with colour processing pipelines.
-    alpha_action : str {'remove' | 'mask'} or None, optional
+
+    alpha_action : str {'remove' | 'mask' | 'error'} or None, optional
         What to do if image has an alpha channel. If 'remove', channel is
         simply removed. If 'mask', channel is first used to mask image and
-        then removed. If None, channel left unchanged (not recommended).
+        then removed. If 'error', raise an error. If None, channel left
+        unchanged (not recommended).
 
     Returns
     -------
@@ -73,7 +65,7 @@ def imread(image, output_dtype=np.float64, pad_depth_channel=True,
     """
     # Load image into numpy array
     if isinstance(image, str) and os.path.isfile(image):
-        im = np.asarray(Image.open(image))
+        im = imageio.imread(image)
     elif isinstance(image, Image.Image):
         im = np.asarray(image)
     elif isinstance(image, np.ndarray):
@@ -94,6 +86,8 @@ def imread(image, output_dtype=np.float64, pad_depth_channel=True,
             im, mask = np.split(im, [-1], axis=-1)
             im *= mask / mask.max()
             im = im.astype(orig_dtype)
+        elif alpha_action == 'error':
+            raise Exception('Image contains alpha channel')
         else:
             raise ValueError('Unrecognised alpha action')
 
@@ -109,7 +103,7 @@ def imread(image, output_dtype=np.float64, pad_depth_channel=True,
     return im
 
 
-def postproc_im(im, output_range=(0,255), output_dtype=np.uint8):
+def postproc_im(im, output_range=(0,255), output_dtype=np.uint8, squeeze=True):
     """
     Utility function for post-processing images. Squeezes trailing dims,
     clips pixel values to given range, and converts to specified datatype.
@@ -118,19 +112,24 @@ def postproc_im(im, output_range=(0,255), output_dtype=np.uint8):
     ---------
     im : numpy array, required
         Input image, as numpy array.
+
     output_range : (min, max) tuple or None, optional
         Min and max values to clip image to. If None, image is not clipped.
+
     output_dtype : valid numpy datatype, optional
         Datatype to convert image to (e.g. uint8, float). If None, image is
         left as current datatype.
+
+    squeeze : bool
+        If True (default), squeeze colour dimension from grayscale images.
 
     Returns
     -------
     im : numpy array
         Processed image array.
     """
-
-    im = im.squeeze()
+    if squeeze:
+        im = im.squeeze()
     if output_range is not None:
         im = im.clip(*output_range)
     if output_dtype is not None:
@@ -147,6 +146,7 @@ def createFourierMaps(imsize, map_type):
     imsize : tuple, required
         (length, width) tuple indicating size of spectrum. Any trailing values
         beyond the first 2 are ignored.
+
     map_type : str {'sf' | 'ori'}, required
         Whether to return spatial frequency or orientation map.
 
@@ -167,7 +167,7 @@ def createFourierMaps(imsize, map_type):
     if map_type == 'sf':
         return np.sqrt(fx**2 + fy**2)
     elif map_type == 'ori':
-        return np.arctan2(fx, fy) % pi
+        return np.mod(np.arctan2(fx, fy), np.pi)
     else:
         raise ValueError('map_type must be one of \'sf\' or \'ori\'')
 
@@ -185,7 +185,6 @@ def sigma2fwhm(sigma):
     Converts a sigma value to a full-width-half-maximum value.
     """
     return sigma * (2 * np.sqrt(2 * np.log(2)))
-
 
 
 # Filter transfer functions
@@ -211,7 +210,6 @@ def butterworth(X, cutoff, order, mu=0, cutin=None):
         If not None, provides a cut-in value for the function.  This allows
         construction of a bandpass filter.  The value should therefore be less
         than the value of the cut-off.
-
     """
     # Sub-func for butterworth transfer function
     def _butter(X, cutoff, order, mu):
@@ -257,18 +255,23 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
     ---------
     image : any valid filepath, PIL Image instance, or numpy array
         Image to apply phase scrambling to.
+
     coherence : float, optional
         Number in range 0-1 that determines amount of phase scrambling to
         apply, with 0 being fully scrambled (default) and 1 being not scrambled
         at all.
+
     rndphi : array, optional
         2D array of random phases - allows using a custom phase spectrum.
         Should be same size as image segments (or whole image if nSegs == 1).
+        If omitted, a random one will be generated.
+
     mask : array, optional
         Mask of weights in range 0-1 that can be applied to random phase array
         (e.g. to scramble only certain parts of the spectrum).  Mask should be
         for an unshifted spectrum, and same size as image segments (or whole
-        image if nSegs == 1),
+        image if nSegs == 1).
+
     nSegs : int, optional
         Number of segments to split image into.  If nSegs is 1 (default),
         scrambling is performed across entire image (i.e. global scrambling).
@@ -277,9 +280,9 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
         and width of image must be divisible by nSegs.  Note that if nSegs > 1
         then values passed to <rndphi> and <mask> arguments must be for size of
         each grid window, not the whole image.
+
     **kwargs
-        Further keyword arguments passed to postproc_im function to control
-        image output.
+        Additional keyword arguments are passed to postproc_im function.
 
     Returns
     -------
@@ -318,7 +321,6 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
     Locally scrambled image within windows of an 8x8 grid
 
     >>> local_scram = applyPhaseScram(im, nSegs = 8)
-
     """
     # Read in image
     im = imread(image)
@@ -347,14 +349,16 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
 
             # If no random phase array specified, make one
             if rndphi is None:
-                rndphi = np.angle(fft2(np.random.rand(segL, segW)))
+                rndphi_ = np.angle(fft2(np.random.rand(segL, segW)))
+            else:
+                rndphi_ = rndphi.copy()
 
             # Weight random phases by (1 - coherence)
-            rndphi *= 1 - coherence
+            rndphi_ *= 1 - coherence
 
             # Weight rndphi by mask if one is provided
             if mask is not None:
-                rndphi *= mask
+                rndphi_ *= mask
 
             # Loop over colour channels (for greyscale this will execute once)
             for i in range(D):
@@ -364,7 +368,7 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
                 ampF = np.abs(F)
                 phiF = np.angle(F)
                 # Calculate new phase spectrum
-                phiF += rndphi
+                phiF += rndphi_
                 # Combine original amplitude spectrum with new phase spectrum
                 F[:] = ampF * np.exp(phiF * 1j)
                 # Inverse transform, assign into scram
@@ -372,40 +376,6 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
 
     # Postproc and return
     return postproc_im(scram, **kwargs)
-
-
-def averageImages(image1, image2, **kwargs):
-    """
-    Makes average of images image1 and image2.
-
-    Arguments
-    ---------
-    image1 : any valid filepath, PIL Image instance, or numpy array
-        First image to enter into hybrid.
-    image2 : any valid filepath, PIL Image instance, or numpy array
-        Second image to enter into hybrid.
-    **kwargs
-        Further keyword arguments passed to postproc_im function to control
-        image output.
-
-    Returns
-    -------
-    average : numpy array
-        Average of input images as numpy array with uint8 datatype.
-    """
-    # Read in images
-    im1 = imread(image1)
-    im2 = imread(image2)
-
-    # Check images are same shape
-    if im1.shape != im2.shape:
-        raise Exception('Images must be same shape')
-
-    # Define hybrid as average of two images
-    average = (im1 + im2) / 2.0
-
-    # Postproc and return
-    return postproc_im(average, **kwargs)
 
 
 def combineAmplitudePhase(ampimage, phaseimage, **kwargs):
@@ -417,17 +387,18 @@ def combineAmplitudePhase(ampimage, phaseimage, **kwargs):
     ---------
     ampimage : any valid filepath, PIL Image instance, or numpy array
         Image to derive amplitude spectrum from.
+
     phaseimage : any valid filepath, PIL Image instance, or numpy array
         Image to derive phase spectrum from.
+
     **kwargs
-        Further keyword arguments passed to postproc_im function to control
-        image output.
+        Additional keyword arguments are passed to postproc_im function.
 
     Returns
     -------
     combo : numpy array
-        Image derived from inputs as numpy array with uint8 datatype.
-        Mean luminance is scaled to approximate the mean of the input images.
+        Processed image as numpy array. Mean luminance is scaled to
+        approximate the mean of the input images.
     """
     # Read in images
     ampim = imread(ampimage)
@@ -464,7 +435,7 @@ def combineAmplitudePhase(ampimage, phaseimage, **kwargs):
     return postproc_im(combo, **kwargs)
 
 
-def makeAmplitudeMask(imsize, rgb=False, alpha=1, **kwargs):
+def makeAmplitudeMask(imsize, rgb=False, beta=1, **kwargs):
     """
     Creates an amplitude mask of specified size.
 
@@ -473,18 +444,20 @@ def makeAmplitudeMask(imsize, rgb=False, alpha=1, **kwargs):
     imsize : tuple or list
         Desired size of mask as (L,W) tuple or [L,W] list. Any further trailing
         values are ignored.
+
     rgb : bool, optional
         If rgb = True, will create a colour mask by layering 3 amplitude masks
         into a RGB space.  Default is False.
-    alpha : int or float
+
+    beta : int or float
         Power to raise frequency to, i.e. amplitude spectrum is given as
-        1/(f**alpha).  When alpha = 1 (default) amplitude mask is pink noise.
-        As alpha increases, mask moves through red / brown noise and appears
-        increasingly smooth.  When alpha = 0, mask is equivalent to white
+        1/(f**beta).  When beta = 1 (default) amplitude mask is pink noise.
+        As beta increases, mask moves through red/brown noise and appears
+        increasingly smooth.  When beta = 0, mask is equivalent to white
         noise.  Recommended values would generally be in range 0.5 to 2.
+
     **kwargs
-        Further keyword arguments passed to postproc_im function to control
-        image output.
+        Additional keyword arguments are passed to postproc_im function.
 
     Returns
     -------
@@ -516,7 +489,7 @@ def makeAmplitudeMask(imsize, rgb=False, alpha=1, **kwargs):
 
     # Make 1/f amplitude spectrum
     with np.errstate(divide = 'ignore'): # (ignore divide by 0 warning at DC)
-        ampF = 1.0 / (SFmap**alpha)
+        ampF = SFmap**(-beta)
     ampF[0,0] = 0 # Set DC to 0 - image will be DC-zeroed
 
     # Make amplitude mask according to rgb argument
@@ -533,7 +506,7 @@ def makeAmplitudeMask(imsize, rgb=False, alpha=1, **kwargs):
     return postproc_im(ampmask, **kwargs)
 
 
-def overlayFixation(image=None, lum=255, offset=8, arm_length=12, arm_width=2,
+def overlayFixation(image=None, lum=255, offset=0, arm_length=12, arm_width=2,
                     imsize=(256,256), bglum=127, **kwargs):
     """
     Overlays fixation cross on specified image.
@@ -543,33 +516,39 @@ def overlayFixation(image=None, lum=255, offset=8, arm_length=12, arm_width=2,
     image : None, or any valid filepath, PIL Image instance, or numpy array
         Image to overlay fixation cross on.  If None (default), will overlay
         on a blank image instead (see also imsize and bglum arguments)
+
     lum : int or RGB tuple of ints, or 4 item tuple of either, optional
         Luminance of fixation cross.  If a single int or RGB tuple, this will
         be taken as the luminance for all 4 fixation arms.  If a 4 item tuple
         of ints or RGB tuples is given, a different luminance will be applied
         to each arm; the ordering should go clockwise from 12 o'clock,
         i.e. (upper, right, bottom, left).
+
     offset : int, optional
         Distance from center of the image to the nearest pixel of each arm
+
     arm_length : int, optional
         Length of each arm of fixation cross, specified in pixels
+
     arm_width : int, optional
         Thickness of each arm of fixation cross, specified in pixels (should be
         even number)
+
     imsize : (L,W) tuple, optional
         Desired size of blank image, defaults to 256x256 pixels.  Ignored if
         image is not None.
+
     bglum : int or RGB tuple of ints, optional
         Background luminance for blank image, defaults to mid-grey (127).
         Ignored if image is not None.
+
     **kwargs
-        Further keyword arguments passed to postproc_im function to control
-        image output.
+        Additional keyword arguments are passed to postproc_im function.
 
     Returns
     -------
     im : numpy array
-        Image with overlaid fixaton cross as numpy array with uint8 datatype.
+        Processes image as numpy array
     """
     AL, AW = arm_length, arm_width # for brevity
 
@@ -615,7 +594,7 @@ def overlayFixation(image=None, lum=255, offset=8, arm_length=12, arm_width=2,
     return postproc_im(im, **kwargs)
 
 
-def plotAverageAmpSpec(indir, ext='png', nSegs=1, dpi=96, cmap='jet'):
+def plotAverageAmpSpec(indir, ext='png', nSegs=1, dpi=96, cmap=None):
     """
     Calculates and plots log-scaled Fourier average amplitude spectrum
     across a number of images.
@@ -631,19 +610,23 @@ def plotAverageAmpSpec(indir, ext='png', nSegs=1, dpi=96, cmap='jet'):
     indir : str
         A valid filepath to directory containing the images to calculate
         the spectra of. All images in indir must have same dimensions.
+
     ext : str
         File extension of the input images (default = png).
+
     nSegs : int, optional
         Number of segments to window image by.  Spectra are calculated within
         each window separately.  If nSegs = 1 (default), the spectrum is
         calculated across the whole image.
+
     dpi : int, optional
         Resolution to save plots at (default = 96).
+
     cmap : any valid matplotlib cmap instance
         Colourmap for filled contour plot.
     """
     # Local imports just for this function
-    import glob, imageio
+    import glob
     import matplotlib.pyplot as plt
 
     # Ensure . character not included in extension
@@ -676,7 +659,7 @@ def plotAverageAmpSpec(indir, ext='png', nSegs=1, dpi=96, cmap='jet'):
     for i, infile in enumerate(infiles):
         print('\t%s' %infile)
 
-        # Read in, grayscale (flatten) if RGB
+        # Read in, grayscale if RGB
         im = imageio.imread(infile, as_gray=True)
 
         # Calculate amplitude spectrum for current window
@@ -710,9 +693,7 @@ def plotAverageAmpSpec(indir, ext='png', nSegs=1, dpi=96, cmap='jet'):
     ax = fig.add_axes([0,0,1,1]) # add axes that fill figure
     ax.axis('off')
     ax.contour(av_spectrum, colors = 'k', origin = 'upper')
-    cf = ax.contourf(av_spectrum, origin = 'upper')
-    cf.set_cmap(cmap)
-    cf.set_clim([0,1])
+    ax.contourf(av_spectrum, origin='upper', cmap=cmap, vmin=0, vmax=1)
     savename = os.path.join(outdir, f'win{nSegs}_filled_contour.png')
     fig.savefig(savename, dpi = dpi)
     print('Saved ' + savename)
@@ -730,6 +711,291 @@ def plotAverageAmpSpec(indir, ext='png', nSegs=1, dpi=96, cmap='jet'):
     fig.savefig(savename, dpi = dpi)
     print('Saved ' + savename)
     plt.close(fig)
+
+
+def makeFourierFilter(image_or_imsize, mode, filtertype, filter_kwargs={},
+                      invert=False):
+    """
+    Makes filter of spatial frequency or orientation, to be applied in
+    Fourier domain. Intended to be used in conjunction with applyFourierFilter.
+
+    Arguments
+    ---------
+    image_or_imsize : (height, width) tuple, or filepath, PIL Image, or array
+        Can be image itself, or a (height, width) tuple giving image size
+
+    mode : 'sf' or 'ori', required
+        Use strings 'sf' or 'ori' to indicate to make a spatial frequency
+        or an orientation filter respectively.
+
+    filtertype : str or callable, required
+        Type of filter to use.  Available options are:
+         * 'gaussian' to use a Gaussian filter
+         * 'butterworth' to use a Butterworth filter
+        Alternatively, may specify a custom callable function.  This
+        function should take a numpy arrary mapping the values (either
+        spatial frequency or orientation) of the Fourier spectrum as its
+        first argument (see also createFourierMaps function).  Spatial
+        frequency values should be given in units of cycles/image, whilst
+        orientation values should be given in radians and should be in the
+        interval 0:pi.  Further keyword arguments to the function may be
+        passed using the filter_kwargs argument of this function.
+
+    filter_kwargs : dict or list of dicts, optional
+        Dictionary of additional keyword arguments to be passed to filter
+        function after the initial argument. Keys should indicate argument
+        names, values should indicate argument values.  If a list of dicts
+        is provided a separate filter will be created for each set of
+        paramemters, and all of them summed together to create a composite
+        filter - this is useful to create a filter with multiple components
+        such as a cardinal or an oblique orientation filter.  In general,
+        units should be given in cycles/image for a frequency filter and in
+        radians in the interval 0:pi for an orientation filter.  If using a
+        named filter (e.g. 'gaussian'), see help information of the
+        relevant function in this script for available arguments.
+
+    invert : bool, optional
+        Set invert = True to invert filter, e.g. to make a high-pass filter
+        (default = False).
+
+    Returns
+    -------
+    filt : numpy array
+        Requested filter as numpy array.
+
+    Example usage
+    -------------
+
+    Low-pass Gaussian filter at FHWM = 30 cycles/image
+
+    >>> from imageprocessing import fwhm2sigma
+    >>> lowfilt = makeFourierFilter(
+    ...     image, mode='sf', filtertype='gaussian',
+    ...     filter_kwargs={'mu':0, 'sigma':fwhm2sigma(30)}
+    ...     )
+
+    High-pass Gaussian filter at FWHM = 50 cycles/image
+
+    >>> highfilt = makeFourierFilter(
+    ...     image, mode='sf', filtertype='gaussian', invert=True,
+    ...     filter_kwargs={'mu':0, 'sigma':fwhm2sigma(50)}
+    ...     )
+
+    Vertical-pass Gaussian filter with at FWHM = 30 degrees
+
+    >>> vertfilt = makeFourierFilter(
+    ...     image, mode='ori', filtertype='gaussian',
+    ...     filter_kwargs={'mu':np.radians(90),
+    ...                    'sigma':np.radians(fwhm2sigma(30))}
+    ...     )
+
+    Oblique-pass 2nd-order Butterworth filter with cut-offs 15 degrees either
+    side of centre orientations.
+
+    >>> oblqfilt = makeFourierFilter(
+    ...     image, mode='ori', filtertype='butterworth',
+    ...     filter_kwargs=[ {'cutoff':np.radians(15), 'order':2,
+    ...                      'mu':np.radians(45)},
+    ...                     {'cutoff':np.radians(15), 'order':2,
+    ...                      'mu':np.radians(135)} ]
+    ...     )
+
+    Low-pass filter using custom ideal-filter with cut-off 30 cycles/image
+
+    >>> def ideal(X, cutoff):
+    ...     return (X <= cutoff).astype(float)
+    >>> idealfilt = makeFourierFilter(image, mode='sf', filtertype=ideal,
+    ...                               filter_kwargs={'cutoff':30})
+
+    See also
+    --------
+    * applyFourierFilter - Apply filter to image.
+    * fwhm2sigma - Convert a full-width-half-maximum value to a sigma value
+      (useful when making Gaussian filters).
+    """
+    # Get image size
+    if isinstance(image_or_imsize, (list, tuple)):
+        imsize = image_or_imsize[:2]
+    else:
+        imsize = imread(image_or_imsize).shape[:2]
+
+    # Ensure appropriate mode
+    if mode not in ['sf', 'ori']:
+        raise ValueError('Mode must be \'sf\' or \'ori\'')
+
+    # Assign appropriate filter function
+    if isinstance(filtertype, str):
+        filtertype = filtertype.lower() # ensure case insensitive
+        if filtertype == 'gaussian':
+            filter_func = gaussian
+        elif filtertype == 'butterworth':
+            filter_func = butterworth
+        else:
+            raise ValueError('Unrecognised filter type')
+    elif callable(filtertype):
+        filter_func = filtertype
+    else:
+        raise TypeError('Filter must be allowable string or callable')
+
+    # If filter_kwargs is a dict, assume only one has been given and wrap
+    # in list
+    if isinstance(filter_kwargs, dict):
+        filter_kwargs = [filter_kwargs]
+
+    # Create spatial frequency or orientations map
+    X = createFourierMaps(imsize, mode)
+
+    # Pre-allocate filter, including trailing dimension for each sub-filter
+    filt = np.empty( X.shape + (len(filter_kwargs),) )
+
+    # Loop through filter_kwargs
+    for i, this_filter_kwargs in enumerate(filter_kwargs):
+        # If doing frequency, just make filter and allocate to array
+        if mode == 'sf':
+            filt[..., i] = filter_func(X, **this_filter_kwargs)
+        # If doing orientation, sum 3 filters to include +/- pi rad
+        else:
+            tmp = [filter_func(X - offset, **this_filter_kwargs) for \
+                   offset in [-pi, 0, pi]]
+            filt[..., i] = np.sum(tmp, axis = 0)
+
+    # Sum filters along last dimension to create composite
+    filt = filt.sum(axis=-1)
+
+    # Scale into range 0-1
+    filt /= filt.max() # scale into range 0-1
+
+    # Invert if requested
+    if invert:
+        filt = 1 - filt
+
+    # Add in DC
+    filt[0,0] = 1
+
+    # Return
+    return filt
+
+
+def applyFourierFilter(image, filt, **kwargs):
+    """
+    Apply filter to image. Intended to be used in conjunction with
+    makeFourierFilter.
+
+    Arguments
+    ---------
+    image : any valid filepath, PIL Image instance, or numpy array
+        Image to apply phase scrambling to.
+
+    filt : array
+        Filter to apply to image. Can be created using makeFourierFilter
+        function. Filter should be for an unshifted spectrum.
+
+    **kwargs
+        Further keyword arguments passed to postproc_im function.
+
+    Returns
+    -------
+    filtim : numpy array
+        Filtered image as numpy array.
+
+    Example usage
+    -------------
+
+    Low-pass Gaussian filter image at FHWM = 30 cycles/image
+
+    >>> from imageprocessing import fwhm2sigma
+    >>> lowfilt = makeFourierFilter(
+    ...     image, mode='sf', filtertype='gaussian',
+    ...     filter_kwargs={'mu':0, 'sigma':fwhm2sigma(30)}
+    ...     )
+    >>> filtim = applyFourierFilter(image, filt)
+
+    See also
+    --------
+    * makeFourierFilter - Makes filter.
+    """
+    # Load image
+    im = imread(image)
+
+    # Pre-allocate array for filtered image
+    filtim = np.empty_like(im)
+
+    # Loop over colour channels (will execute only once if grayscale)
+    for i in range(im.shape[2]):
+        F = fft2(im[:,:,i]) # into frequency domain
+        F *= filt # apply filter
+        filtim[:,:,i] = ifft2(F).real # back to image domain
+
+    # Postproc and return
+    return postproc_im(filtim, **kwargs)
+
+
+def makeHybridImage(image1, image2, filter1_params, filter2_params, **kwargs):
+    """
+    Create hybrid image by filtering two images and compositing the results.
+
+    Parameters
+    ----------
+    image1, image2: Any valid filepaths, PIL Image instances, or numpy arrays
+        Input images. Must have same dimensions.
+
+    filter1_params, filter2_params : dicts
+        Dictionaries of keyword arguments to pass to ``makeFourierFilter``
+        function, except for `image_or_imsize` argument which gets set by
+        this function. Filters will be applied to image1 and image2
+        respectively.
+
+    **kwargs
+        Additional keyword arguments are passed to postproc_im function.
+
+    Returns
+    -------
+    hybrid : numpy array
+        Hybrid image as numpy array.
+
+    Example usage
+    -------------
+
+    Make a spatial frequency hybrid, with the first image low-pass filtered
+    below FWHM = 30 cycles/image, and the second image high-pass filtered
+    above FWHM = 50 cycles/image.
+
+    >>> from imageprocessing import fwhm2sigma
+    >>> filter1_params = {'mode':'sf', 'filtertype':'gaussian', 'invert':False,
+    ...                   'filter_kwargs':{'sigma':fwhm2sigma(30)}}
+    >>> filter2_params = {'mode':'sf', 'filtertype':'gaussian', 'invert':True,
+    ...                   'filter_kwargs':{'sigma':fwhm2sigma(50)}}
+    >>> hybrid = makeHybridImage(
+    ...     image1, image2, filter1_params, filter2_params
+    ...     )
+    """
+    # Read images
+    im1 = imread(image1)
+    im2 = imread(image2)
+    if im1.shape != im2.shape:
+        raise Exception('Input images must have same dimensions')
+
+    # Create filters, set DCs to 0.5
+    filter1_params['image_or_imsize'] = im1
+    filt1 = makeFourierFilter(**filter1_params)
+    filt1[0,0] = 0.5
+
+    filter2_params['image_or_imsize'] = im2
+    filt2 = makeFourierFilter(**filter2_params)
+    filt2[0,0] = 0.5
+
+    # Filter images
+    filtim1 = applyFourierFilter(im1, filt1, output_range=None,
+                                 output_dtype=None, squeeze=False)
+    filtim2 = applyFourierFilter(im2, filt2, output_range=None,
+                                 output_dtype=None, squeeze=False)
+
+    # Add filtered images to create hybrid
+    hybrid = filtim1 + filtim2
+
+    # Postproc and return
+    return postproc_im(hybrid, **kwargs)
+
 
 
 ##### MAIN CLASS DEFINITIONS #####
@@ -840,12 +1106,14 @@ class SoftWindowImage():
         ---------
         image : any valid filepath, PIL Image instance, or numpy array
             Image to apply mask to.
+
         bglum : {'mean', int or float, RGB tuple of ints or floats}, optional
             Luminance to set background outside masked region to.
             If set to 'mean' (default) the mean image luminance is used.
+
         **kwargs
-            Further keyword arguments passed to postproc_im function to
-            control image output.
+            Additional keyword arguments are passed to postproc_im function.
+
 
         Returns
         -------
@@ -876,241 +1144,3 @@ class SoftWindowImage():
 
         # Postproc and return
         return postproc_im(im, **kwargs)
-
-
-class FourierFilter():
-    """
-    Class provides functions for full pipeline of filtering images in Fourier
-    domain by either spatial frequency or orientation.
-
-    Arguments
-    ---------
-    image : any valid filepath, PIL Image instance, or numpy array
-        Class is instantiated with image.
-
-    Methods
-    -------
-    .makeFilter
-        Makes spatial frequency or orientation filter
-    .applyFilter
-        Applies filter to image
-
-    Examples
-    --------
-    Low-pass Gaussian filter image at FHWM = 30 cycles/image
-
-    >>> from imageprocessing import fwhm2sigma
-    >>> im = imageio.imread('imageio:camera.png')
-    >>> filterer = FourierFilter(im)
-    >>> lowfilt = filterer.makeFilter(
-    ...     mode='sf', filtertype='gaussian',
-    ...     filter_kwargs={'mu':0, 'sigma':fwhm2sigma(30)}
-    ...     )
-    >>> lowim = filterer.applyFilter(lowfilt)
-
-    High-pass Gaussian filter at FWHM = 50 cycles/image
-
-    >>> highfilt = filterer.makeFilter(
-    ...     mode='sf', filtertype='gaussian', invert=True,
-    ...     filter_kwargs={'mu':0, 'sigma':fwhm2sigma(50)}
-    ...     )
-    >>> highim = filterer.applyFilter(highfilt)
-
-    Vertical-pass Gaussian filter with at FWHM = 30 degrees
-
-    >>> vertfilt = filterer.makeFilter(
-    ...     mode='ori', filtertype='gaussian',
-    ...     filter_kwargs={'mu':np.radians(90),
-    ...                    'sigma':np.radians(fwhm2sigma(30))}
-    ...     )
-    >>> vertim = filterer.applyFilter(vertfilt)
-
-    Oblique-pass 2nd-order Butterworth filter with cut-offs 15 degrees either
-    side of centre orientations.
-
-    >>> oblqfilt = filterer.makeFilter(
-    ...     mode='ori', filtertype='butterworth',
-    ...     filter_kwargs=[ {'cutoff':np.radians(15), 'order':2,
-    ...                      'mu':np.radians(45)},
-    ...                     {'cutoff':np.radians(15), 'order':2,
-    ...                      'mu':np.radians(135)} ]
-    ...     )
-    >>> oblqim = filterer.applyFilter(oblqfilt)
-
-    Low-pass filter using custom ideal-filter with cut-off 30 cycles/image
-
-    >>> def ideal(X, cutoff):
-    ...     return (X <= cutoff).astype(float)
-    >>> idealfilt = filterer.makeFilter(mode='sf', filtertype=ideal,
-    ...                                 filter_kwargs={'cutoff':30})
-    >>> idealim = filterer.applyFilter(idealfilt)
-
-    If only wanting to create the filter, and the image dimensions are known
-    in advance, the filter can also be made by the .filter_from_imsize class
-    method without requiring the class to instantiated or a real image to be
-    loaded.
-
-    >>> lowfilt = FourierFilter.filter_from_imsize(
-    ...     imsize=(512,512), mode='sf', filtertype='gaussian',
-    ...     filter_kwargs={'mu':0, 'sigma':fwhm2sigma(30)}
-    ...    )
-    """
-    def __init__(self, im):
-        # Read image
-        self.im = imread(im)
-
-    @classmethod
-    def filter_from_imsize(cls, imsize, *args, **kwargs):
-        """
-        Class method returns filter based simply on image dimensions, without
-        requiring class to be instantiated or a real image to be loaded.
-
-        Parameters
-        ----------
-        imsize : array-like, required
-            (height, width) array giving image size in pixels.
-        *args, **kwargs
-            Additional arguments passed to .makeFilter method.
-
-        Returns
-        -------
-        filt : numpy array
-            Requested filter as numpy array
-        """
-        return cls(np.zeros(imsize)).makeFilter(*args, **kwargs)
-
-    def makeFilter(self, mode, filtertype, filter_kwargs={}, invert=False):
-        """
-        Makes filter of spatial frequency or orientation, to be applied in
-        Fourier domain.
-
-        Arguments
-        ---------
-        mode : 'sf' or 'ori', required
-            Use strings 'sf' or 'ori' to indicate to make a spatial frequency
-            or an orientation filter respectively.
-        filtertype : str or callable, required
-            Type of filter to use.  Available options are:
-             * 'gaussian' to use a Gaussian filter
-             * 'butterworth' to use a Butterworth filter
-            Alternatively, may specify a custom callable function.  This
-            function should take a numpy arrary mapping the values (either
-            spatial frequency or orientation) of the Fourier spectrum as its
-            first argument (see also createFourierMaps function).  Spatial
-            frequency values should be given in units of cycles/image, whilst
-            orientation values should be given in radians and should be in the
-            interval 0:pi.  Further keyword arguments to the function may be
-            passed using the filter_kwargs argument of this function.
-        filter_kwargs : dict or list of dicts, optional
-            Dictionary of additional keyword arguments to be passed to filter
-            function after the initial argument. Keys should indicate argument
-            names, values should indicate argument values.  If a list of dicts
-            is provided a separate filter will be created for each set of
-            paramemters, and all of them summed together to create a composite
-            filter - this is useful to create a filter with multiple components
-            such as a cardinal or an oblique orientation filter.  In general,
-            units should be given in cycles/image for a frequency filter and in
-            radians in the interval 0:pi for an orientation filter.  If using a
-            named filter (e.g. 'gaussian'), see help information of the
-            relevant function in this script for available arguments.
-        invert : bool, optional
-            Set invert = True to invert filter, e.g. to make a high-pass filter
-            (default = False).
-
-        Returns
-        -------
-        filt : numpy array
-            Requested filter as numpy array.
-
-        See also
-        --------
-        * fwhm2sigma function can be used to convert a full-width-half-maximum
-        value to a sigma value - useful when making Gaussian filters.
-
-        """
-        # Ensure appropriate mode
-        if mode not in ['sf', 'ori']:
-            raise ValueError('Mode must be \'sf\' or \'ori\'')
-
-        # Assign appropriate filter function
-        if isinstance(filtertype, str):
-            filtertype = filtertype.lower() # ensure case insensitive
-            if filtertype == 'gaussian':
-                filter_func = gaussian
-            elif filtertype == 'butterworth':
-                filter_func = butterworth
-            else:
-                raise ValueError('Unrecognised filter type')
-        elif callable(filtertype):
-            filter_func = filtertype
-        else:
-            raise TypeError('Filter must be allowable string or callable')
-
-        # If filter_kwargs is a dict, assume only one has been given and wrap
-        # in list
-        if isinstance(filter_kwargs, dict):
-            filter_kwargs = [filter_kwargs]
-
-        # Create spatial frequency or orientations map
-        X = createFourierMaps(self.im.shape[:2], mode)
-
-        # Pre-allocate filter, including trailing dimension for each sub-filter
-        filt = np.empty( X.shape + (len(filter_kwargs),) )
-
-        # Loop through filter_kwargs
-        for i, this_filter_kwargs in enumerate(filter_kwargs):
-            # If doing frequency, just make filter and allocate to array
-            if mode == 'sf':
-                filt[..., i] = filter_func(X, **this_filter_kwargs)
-            # If doing orientation, sum 3 filters to include +/- pi rad
-            else:
-                tmp = [filter_func(X - offset, **this_filter_kwargs) for \
-                       offset in [-pi, 0, pi]]
-                filt[..., i] = np.sum(tmp, axis = 0)
-
-        # Sum filters along last dimension to create composite
-        filt = filt.sum(axis=-1)
-
-        # Scale into range 0-1
-        filt /= filt.max() # scale into range 0-1
-
-        # Invert if requested
-        if invert:
-            filt = 1 - filt
-
-        # Add in DC
-        filt[0,0] = 1
-
-        # Return
-        return filt
-
-    def applyFilter(self, filt, **kwargs):
-        """
-        Apply filter to image.
-
-        Arguments
-        ---------
-        filt : array
-            Filter to apply to image. Can be created using makeFilter function
-            in this class.  Filter should be for an unshifted spectrum.
-        **kwargs
-            Further keyword arguments passed to postproc_im function to
-            control image output.
-
-        Returns
-        -------
-        filtim : numpy array
-            Filtered image as numpy array with requested datatype.
-
-        """
-        # Pre-allocate array for filtered image
-        filtim = np.empty_like(self.im)
-
-        # Loop over colour channels (will execute only once if grayscale)
-        for i in range(self.im.shape[2]):
-            F = fft2(self.im[:,:,i]) # into frequency domain
-            F *= filt # apply filter
-            filtim[:,:,i] = ifft2(F).real # back to image domain
-
-        # Postproc and return
-        return postproc_im(filtim, **kwargs)
