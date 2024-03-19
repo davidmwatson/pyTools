@@ -348,9 +348,8 @@ def plot_matrix(array, cbar=True, annotate_vals=True, avdiag=False,
     font : str
         Font style for text.
 
-    cmap : str or matplotlib cmap instance
-        May be any valid matplotlib colormap (string or matplotlib cmap
-        instance) or fsl colormap string (see get_fsl_cmap function).
+    cmap : str or matplotlib.colors.Colormap instance
+        Any valid input to ``get_colourmap`` function.
 
     fontcolor : str, rgb / rgba tuple, or hex value).
         Font color of all text
@@ -592,9 +591,8 @@ def polar_pcolormesh(C, r=None, theta=None, hemi='both', theta_units='rad',
         Should theta increment clockwise ('clockwise', 'cw', or -1) or
         counter-clockwise ('counterclockwise', 'ccw', or 1)?
 
-    cmap : str or matplotlib cmap instance
-        May be any valid matplotlib colormap (string or matplotlib cmap
-        instance) or fsl colormap string (see get_fsl_cmap function).
+    cmap : str or matplotlib.colors.Colormap instance
+        Any valid input to ``get_colourmap`` function.
 
     vmin, vmax : float
         Limits for colourmap. If not specified, will default to data limits.
