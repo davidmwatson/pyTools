@@ -293,7 +293,7 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
     --------
     Phase scramble image with 0% coherence
 
-    >>> im = imageio.imread('imageio:camera.png')
+    >>> im = imageio.imread('imageio:coffee.png')
     >>> scram1 = applyPhaseScram(im)
 
     Scramble with 40% phase coherence
@@ -309,10 +309,9 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
     Weight rndphi by mask.  Here we weight by an inverted horizontal-pass
     filter to scramble vertical orientations but preserve horizontals.
 
-    >>> from imageprocessing import FourierFilter
-    >>> filterer = FourierFilter(im)
-    >>> filt = filterer.makeFilter(
-    ...     mode='ori', filtertype='gaussian', invert=True,
+    >>> from imageprocessing import makeFourierFilter
+    >>> filt = makeFourierFilter(
+    ...     im, mode='ori', filtertype='gaussian', invert=True,
     ...     filter_kwargs = {'mu':np.radians(0),
     ...                      'sigma':fwhm2sigma(np.radians(45))}
     ...     )
@@ -320,7 +319,7 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
 
     Locally scrambled image within windows of an 8x8 grid
 
-    >>> local_scram = applyPhaseScram(im, nSegs = 8)
+    >>> scram5 = applyPhaseScram(im, nSegs = 8)
     """
     # Read in image
     im = imread(image)
@@ -548,7 +547,7 @@ def overlayFixation(image=None, lum=255, offset=0, arm_length=12, arm_width=2,
     Returns
     -------
     im : numpy array
-        Processes image as numpy array
+        Processed image as numpy array
     """
     AL, AW = arm_length, arm_width # for brevity
 
@@ -768,23 +767,24 @@ def makeFourierFilter(image_or_imsize, mode, filtertype, filter_kwargs={},
 
     Low-pass Gaussian filter at FHWM = 30 cycles/image
 
+    >>> im = imageio.imread('imageio:coffee.png')
     >>> from imageprocessing import fwhm2sigma
     >>> lowfilt = makeFourierFilter(
-    ...     image, mode='sf', filtertype='gaussian',
+    ...     im, mode='sf', filtertype='gaussian',
     ...     filter_kwargs={'mu':0, 'sigma':fwhm2sigma(30)}
     ...     )
 
     High-pass Gaussian filter at FWHM = 50 cycles/image
 
     >>> highfilt = makeFourierFilter(
-    ...     image, mode='sf', filtertype='gaussian', invert=True,
+    ...     im, mode='sf', filtertype='gaussian', invert=True,
     ...     filter_kwargs={'mu':0, 'sigma':fwhm2sigma(50)}
     ...     )
 
     Vertical-pass Gaussian filter with at FWHM = 30 degrees
 
     >>> vertfilt = makeFourierFilter(
-    ...     image, mode='ori', filtertype='gaussian',
+    ...     im, mode='ori', filtertype='gaussian',
     ...     filter_kwargs={'mu':np.radians(90),
     ...                    'sigma':np.radians(fwhm2sigma(30))}
     ...     )
@@ -793,7 +793,7 @@ def makeFourierFilter(image_or_imsize, mode, filtertype, filter_kwargs={},
     side of centre orientations.
 
     >>> oblqfilt = makeFourierFilter(
-    ...     image, mode='ori', filtertype='butterworth',
+    ...     im, mode='ori', filtertype='butterworth',
     ...     filter_kwargs=[ {'cutoff':np.radians(15), 'order':2,
     ...                      'mu':np.radians(45)},
     ...                     {'cutoff':np.radians(15), 'order':2,
@@ -804,7 +804,7 @@ def makeFourierFilter(image_or_imsize, mode, filtertype, filter_kwargs={},
 
     >>> def ideal(X, cutoff):
     ...     return (X <= cutoff).astype(float)
-    >>> idealfilt = makeFourierFilter(image, mode='sf', filtertype=ideal,
+    >>> idealfilt = makeFourierFilter(im, mode='sf', filtertype=ideal,
     ...                               filter_kwargs={'cutoff':30})
 
     See also
@@ -903,9 +903,10 @@ def applyFourierFilter(image, filt, **kwargs):
 
     Low-pass Gaussian filter image at FHWM = 30 cycles/image
 
+    >>> im = imageio.imread('imageio:coffee.png')
     >>> from imageprocessing import fwhm2sigma
     >>> lowfilt = makeFourierFilter(
-    ...     image, mode='sf', filtertype='gaussian',
+    ...     im, mode='sf', filtertype='gaussian',
     ...     filter_kwargs={'mu':0, 'sigma':fwhm2sigma(30)}
     ...     )
     >>> filtim = applyFourierFilter(image, filt)
@@ -960,13 +961,15 @@ def makeHybridImage(image1, image2, filter1_params, filter2_params, **kwargs):
     below FWHM = 30 cycles/image, and the second image high-pass filtered
     above FWHM = 50 cycles/image.
 
+    >>> im1 = imageio.imread('imageio:camera.png')
+    >>> im2 = imageio.imread('imageio:astronaut.png', as_gray=True)
     >>> from imageprocessing import fwhm2sigma
     >>> filter1_params = {'mode':'sf', 'filtertype':'gaussian', 'invert':False,
     ...                   'filter_kwargs':{'sigma':fwhm2sigma(30)}}
     >>> filter2_params = {'mode':'sf', 'filtertype':'gaussian', 'invert':True,
     ...                   'filter_kwargs':{'sigma':fwhm2sigma(50)}}
     >>> hybrid = makeHybridImage(
-    ...     image1, image2, filter1_params, filter2_params
+    ...     im1, im2, filter1_params, filter2_params
     ...     )
     """
     # Read images
@@ -1024,7 +1027,7 @@ class SoftWindowImage():
     --------
     Apply a rectangular soft window
 
-    >>> im = imageio.imread('imageio:camera.png')
+    >>> im = imageio.imread('imageio:astronaut.png')
     >>> windower = SoftWindowImage('rect')
     >>> winIm = windower.maskImage(im)
 
@@ -1114,12 +1117,10 @@ class SoftWindowImage():
         **kwargs
             Additional keyword arguments are passed to postproc_im function.
 
-
         Returns
         -------
         im : numpy array
             Masked image as numpy array with datatype uint8.
-
         """
         # Read image
         im = imread(image)
