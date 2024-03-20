@@ -180,7 +180,7 @@ def plot_cbar(vmin=0, vmax=1, dp=2, cmap=None, label=None, labelsize=20,
 
     # Define figure and axes
     fig = plt.figure(figsize=figsize)
-    ax = fig.addax_es(rect)
+    ax = fig.add_axes(rect)
 
     # Create a normalised color range - this needs handling differently
     # depending on whether the colormap should be segmented or not
