@@ -720,8 +720,9 @@ def makeFourierFilter(image_or_imsize, mode, filtertype, filter_kwargs={},
 
     Arguments
     ---------
-    image_or_imsize : (height, width) tuple, or filepath, PIL Image, or array
-        Can be image itself, or a (height, width) tuple giving image size
+    image_or_imsize : int, (height,width) tuple, filepath, PIL Image, or array
+        Can be image itself, or a (height, width) tuple giving image size. If
+        a single integer, will take this as the size of a square image.
 
     mode : 'sf' or 'ori', required
         Use strings 'sf' or 'ori' to indicate to make a spatial frequency
@@ -816,6 +817,8 @@ def makeFourierFilter(image_or_imsize, mode, filtertype, filter_kwargs={},
     # Get image size
     if isinstance(image_or_imsize, (list, tuple)):
         imsize = image_or_imsize[:2]
+    elif isinstance(image_or_imsize, (int, float)):
+        imsize = [int(image_or_imsize)] * 2
     else:
         imsize = imread(image_or_imsize).shape[:2]
 
