@@ -2,25 +2,39 @@
 
 """
 Script supports assorted image processing capabilities:
+
  * Phase scrambling (applyPhaseScram)
+
  * Applying soft windows (SoftWindowImage)
+
  * Making amplitude / phase image composites (combineAmplitudePhase)
+
  * Fourier filtering (makeFourierFilter, applyFourierFilter)
+
  * Make hybrid filtered images (makeHybridImage)
+
  * Making amplitude masks (makeAmplitudeMask)
+
  * Overlaying a fixation cross on an image (overlayFixation)
+
  * Plotting average amplitude spectra (plotAverageAmpSpec)
+
 
 Also includes assorted utitlity functions which may come in handy when using
 other functions in this script:
+
  * imread - Reads in an image and prepares for use by other functions and
    classes in this script (shouldn't need to use directly very often)
+
  * createFourierMaps - Returns maps of the spatial frequency and orientation
    domains of a Fourier spectrum.
- * gaussian - Returns a Gaussian transfer function
- * butterworth - Returns a Butterworth transfer function
+
+ * gaussian - Gaussian function.
+
+ * butterworth - Butterworth function.
+
  * fwhm2sigma, sigma2fwhm - Converts between full-width-half-maximum and sigma
-   values used for defining bandwidths for some filters (e.g. Gaussians)
+   values used for defining bandwidths for some filters (e.g. Gaussians).
 """
 
 ### Import statements
@@ -30,6 +44,8 @@ from numpy import pi
 from numpy.fft import fft2, ifft2, fftshift, ifftshift
 import scipy.ndimage
 from PIL import Image
+
+RNG = np.random.default_rng()
 
 
 ##### UTILITY FUNCTION DEFINITIONS #####
@@ -187,10 +203,10 @@ def sigma2fwhm(sigma):
     return sigma * (2 * np.sqrt(2 * np.log(2)))
 
 
-# Filter transfer functions
+# Filter functions
 def butterworth(X, cutoff, order, mu=0, cutin=None):
     """
-    Butterworth transfer function.
+    Butterworth function.
 
     Parameters
     ----------
@@ -211,17 +227,16 @@ def butterworth(X, cutoff, order, mu=0, cutin=None):
         construction of a bandpass filter.  The value should therefore be less
         than the value of the cut-off.
     """
-    # Sub-func for butterworth transfer function
-    def _butter(X, cutoff, order, mu):
+    # Sub-func for butterworth function
+    def func(X, cutoff, order, mu):
         return 1 / (1 + ( (X-mu) / cutoff)**(2*order))
 
     # Create cutoff filter
-    B = _butter(X, cutoff, order, mu)
+    B = func(X, cutoff, order, mu)
 
     # If cutin, create 2nd filter and subtract from 1st one
     if cutin is not None:
-        B2 = _butter(X, cutin, order, mu)
-        B -= B2
+       B -= func(X, cutin, order, mu)
 
     # Return
     return B
@@ -229,7 +244,7 @@ def butterworth(X, cutoff, order, mu=0, cutin=None):
 
 def gaussian(X, sigma, mu=0):
     """
-    Gaussian transfer function.
+    Gaussian function.
 
     Parameters
     ----------
@@ -348,7 +363,7 @@ def applyPhaseScram(image, coherence=0.0, rndphi=None, mask=None, nSegs=1,
 
             # If no random phase array specified, make one
             if rndphi is None:
-                rndphi_ = np.angle(fft2(np.random.rand(segL, segW)))
+                rndphi_ = np.angle(fft2(RNG.uniform(size=[segL,segW])))
             else:
                 rndphi_ = rndphi.copy()
 
@@ -467,7 +482,7 @@ def makeAmplitudeMask(imsize, rgb=False, beta=1, **kwargs):
     def _run(ampF, L, W):
         """ Sub-function. Handles creation of amplitude mask """
         # Make random phase spectrum
-        rndphi = np.angle(fft2(np.random.rand(L,W)))
+        rndphi = np.angle(fft2(RNG.uniform(size=[L,W])))
 
         # Construct Fourier spectrum, inverse transform
         F = ampF * np.exp(1j * rndphi)
@@ -849,7 +864,7 @@ def makeFourierFilter(image_or_imsize, mode, filtertype, filter_kwargs={},
     X = createFourierMaps(imsize, mode)
 
     # Pre-allocate filter, including trailing dimension for each sub-filter
-    filt = np.empty( X.shape + (len(filter_kwargs),) )
+    filt = np.zeros( X.shape + (len(filter_kwargs),) )
 
     # Loop through filter_kwargs
     for i, this_filter_kwargs in enumerate(filter_kwargs):
@@ -858,15 +873,11 @@ def makeFourierFilter(image_or_imsize, mode, filtertype, filter_kwargs={},
             filt[..., i] = filter_func(X, **this_filter_kwargs)
         # If doing orientation, sum 3 filters to include +/- pi rad
         else:
-            tmp = [filter_func(X - offset, **this_filter_kwargs) for \
-                   offset in [-pi, 0, pi]]
-            filt[..., i] = np.sum(tmp, axis = 0)
+            for offset in [-pi, 0, pi]:
+                filt[..., i] += filter_func(X + offset, **this_filter_kwargs)
 
     # Sum filters along last dimension to create composite
     filt = filt.sum(axis=-1)
-
-    # Scale into range 0-1
-    filt /= filt.max() # scale into range 0-1
 
     # Invert if requested
     if invert:
