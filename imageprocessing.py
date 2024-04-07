@@ -863,21 +863,18 @@ def makeFourierFilter(image_or_imsize, mode, filtertype, filter_kwargs={},
     # Create spatial frequency or orientations map
     X = createFourierMaps(imsize, mode)
 
-    # Pre-allocate filter, including trailing dimension for each sub-filter
-    filt = np.zeros( X.shape + (len(filter_kwargs),) )
+    # Pre-allocate filter
+    filt = np.zeros(X.shape)
 
     # Loop through filter_kwargs
-    for i, this_filter_kwargs in enumerate(filter_kwargs):
+    for this_filter_kwargs in filter_kwargs:
         # If doing frequency, just make filter and allocate to array
         if mode == 'sf':
-            filt[..., i] = filter_func(X, **this_filter_kwargs)
+            filt += filter_func(X, **this_filter_kwargs)
         # If doing orientation, sum 3 filters to include +/- pi rad
         else:
             for offset in [-pi, 0, pi]:
-                filt[..., i] += filter_func(X + offset, **this_filter_kwargs)
-
-    # Sum filters along last dimension to create composite
-    filt = filt.sum(axis=-1)
+                filt += filter_func(X + offset, **this_filter_kwargs)
 
     # Invert if requested
     if invert:
