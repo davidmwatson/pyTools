@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Updated version of CIFTI tools. Simplifies masker by removing ability to
-invert mask, while also adding some new functionality such as selecting
-specific label IDs or using CIFTI structures as masks.
-
-Requires nibabel >= v3.2, which isn't currently installed at YNiC. You might
-need to pip install it yourself:
-pip3 install --user --upgrade nibabel==3.2
+Assorted tools for reading and writing data from/to CIFTI files.
 """
 
-import os, warnings, inspect, copy
+import os, inspect, copy
 import numpy as np
 import nibabel as nib
 
@@ -126,15 +120,49 @@ class CiftiHandler(object):
     * get_all_data : Convenience function for extracting surface and volume data
     * create_new_cifti : Create new CIFTI image from provided data
 
+    Example usage
+    -------------
+    Load all data from example dataset for first HCP subject.
+
+    >>> infile = '/mnt/hcpdata/Facelab/100610/MNINonLinear/Results/' \\
+    ...     'rfMRI_REST1_7T_PA/rfMRI_REST1_7T_PA_Atlas_hp2000_clean.dtseries.nii'
+    >>> handler = CiftiHandler(infile)
+    >>> data = handler.get_all_data()
+    >>> for block_name, block_data in data.items():
+    ...     print(block_name, block_data.shape)
+
+    ::
+
+        lh (900, 29696)
+        rh (900, 29716)
+        volume (900, 31870)
+
+    Setting ``full_surface = True`` will return the full set of surface
+    vertices, filling in missing vertices along the medial wall with zeros.
+
+    >>> handler = CiftiHandler(infile, full_surface=True)
+    >>> data = handler.get_all_data()
+    >>> for block_name, block_data in data.items():
+    ...     print(block_name, block_data.shape)
+
+    ::
+
+        lh (900, 32492)
+        rh (900, 32492)
+        volume (900, 31870)
+
+    Use the ``create_new_cifti`` method to reverse the process, creating a new
+    CIFTI object from the data arrays.
+
+    >>> newImg = handler.create_new_cifti(data['lh'], data['rh'], data['volume'])
+    >>> newImg.to_filename('my_data.dtseries.nii')
     """
     def __init__(self, img, full_surface=False):
         # Load cifti
         if isinstance(img, nib.Cifti2Image):
             self.cifti = img
         elif isinstance(img, str) and os.path.isfile(img):
-            with warnings.catch_warnings():
-                warnings.simplefilter('ignore')
-                self.cifti = nib.load(img)
+            self.cifti = nib.load(img)
         else:
             raise ValueError('img must be valid filepath or Cifti2Image object')
 
@@ -154,7 +182,7 @@ class CiftiHandler(object):
         # Loop structures, return matching one
         for name, struct_indices, model in self.axis1.iter_structures():
             if name == struct_name:
-                return struct_indices, model
+                return struct_indices, model, struct_name
 
         # If we reach here then structure doesn't exist - raise error
         raise Exception(f'No data found for structure: {struct_name}')
@@ -240,7 +268,7 @@ class CiftiHandler(object):
 
         Arguments
         ---------
-        hemi : str { lh | rh }
+        hemi : str { lh | rh | L | R }
             Name of hemisphere to load data from.
 
         dtype : None or valid dtype
@@ -256,9 +284,9 @@ class CiftiHandler(object):
             [samples x vertices] numpy array containing data values.
         """
         # Work out surface name
-        if hemi == 'lh':
+        if hemi.lower() in ['lh', 'l']:
             surf_name = 'left_cortex'
-        elif hemi == 'rh':
+        elif hemi.lower() in ['rh', 'r']:
             surf_name = 'right_cortex'
         else:
             raise ValueError(f'Unrecognised hemisphere: \'{hemi}\'')
@@ -267,17 +295,17 @@ class CiftiHandler(object):
         n_samp = self.axis0.size
 
         # Search axis structures for requested surface
-        struct_indices, model = self._get_struct_info(surf_name)
+        slice_, model, struct_name = self._get_struct_info(surf_name)
 
         # Extract surface data, pad to full set of vertices if necessary
         data = self.cifti.get_fdata()
         if self.full_surface:
             vtx_indices = model.vertex
-            n_vtx = vtx_indices.max() + 1
+            n_vtx = model.nvertices[struct_name]
             surf_data = np.zeros([n_samp, n_vtx], dtype=dtype)
-            surf_data[:, vtx_indices] = data[:, struct_indices]
+            surf_data[:, vtx_indices] = data[:, slice_]
         else:
-            surf_data = data[:, struct_indices]
+            surf_data = data[:, slice_]
 
         # Convert dtype?
         if dtype is not None:
@@ -331,25 +359,18 @@ class CiftiHandler(object):
         data = np.zeros([n_samp, n_grayordinates])
 
         # Process left surface
-        indices, model = self.get_struct_info('left_cortex')
         if left_surface_data is not None:
+            slice_, model = self._get_struct_info('left_cortex')[:2]
             if self.full_surface:
                 left_surface_data = left_surface_data[..., model.vertex]
-        else:
-            left_surface_data = np.zeros([n_samp, indices.stop - indices.start])
+            data[..., slice_] = left_surface_data
 
         # Process right surface
-        indices, model = self.get_struct_info('right_cortex')
         if right_surface_data is not None:
+            slice_, model = self._get_struct_info('right_cortex')[:2]
             if self.full_surface:
                 right_surface_data = right_surface_data[..., model.vertex]
-        else:
-            right_surface_data = np.zeros([n_samp, indices.stop - indices.start])
-
-        # Concat surface data over hemispheres and add to data array
-        surface_data = np.hstack([left_surface_data, right_surface_data])
-        surface_mask = self._get_surface_mask()
-        data[..., surface_mask] = surface_data
+            data[..., slice_] = right_surface_data
 
         # Allocate volume data to array
         if volume_data is not None:
@@ -364,7 +385,7 @@ class CiftiHandler(object):
 
     def uncache(self):
         """
-        Uncache data from memory - good idea to call this when done.
+        Uncache data from memory.
         """
         self.cifti.uncache()
 
@@ -385,11 +406,87 @@ class CiftiMasker(object):
     Methods
     -------
     * fit : Load mask
-    * transform() : Load dataset, applying mask
+    * transform : Load dataset, applying mask
     * transform_multiple : Load multiple datasets, applying mask
     * fit_transform[_multiple] : Fit and transform in one go
     * inverse_transform : Create new CIFTI image from masked data
     * uncache : Clear cache
+
+    Example usage
+    -------------
+    Use masks from Freesurfer Desikan-Killiany atlas for example subject.
+
+    >>> maskfile = '/mnt/hcpdata/Facelab/100610/MNINonLinear/' \\
+    ...     'fsaverage_LR32k/100610.aparc.32k_fs_LR.dlabel.nii'
+    >>> masker = CiftiMasker(maskfile).fit()
+
+    Use the ``transform`` method to mask data. By default, this will mask by
+    the label with a numerical ID of 1 - this will work if the dlabel file
+    contains only one label, but might not give you data for the label you want
+    if there are multiple labels. In the APARC atlas, the first label is the
+    ``'L_banksts'``. In this example, the masked data contains 900 time points
+    and 456 vertices.
+
+    >>> infile = '/mnt/hcpdata/Facelab/100610/MNINonLinear/Results/' \\
+    ...     'rfMRI_REST1_7T_PA/rfMRI_REST1_7T_PA_Atlas_hp2000_clean.dtseries.nii'
+    >>> ROI_data = masker.transform(infile)
+    >>> print(ROI_data.shape)
+
+    ::
+
+        (900, 456)
+
+    When the dlabel file contains multiple labels, it is often useful to specify
+    which label to extract the data from. Here, we mask by the right
+    parahippocampal region. Now, the masked data contains 900 time points and
+    313 vertices.
+
+    >>> ROI_data = masker.transform(infile, labelID='R_parahippocampal')
+    >>> print(ROI_data.shape)
+
+    ::
+
+        (900, 313)
+
+    The ``mask_block`` argument can be used to restrict the data to specific
+    blocks of the CIFTI file (left surface, right surface, or subcortical).
+    For instance, this could be useful if the dlabel file contains bilateral
+    labels, but you want to only use the label in one hemisphere. However, in
+    the APARC atlas, the label names already indicate the hemisphere. If we
+    again mask by the right parahippocampal region, setting
+    ``mask_block = 'surface'`` or ``mask_block = 'rh'`` will have no effect,
+    but setting ``mask_block = 'lh'`` would prevent any grayordinates being
+    selected (it would not make sense to do this in practice).
+
+    >>> ROI_data = masker.transform(infile, labelID='R_parahippocampal',
+    ...                              mask_block='lh')
+    >>> print(ROI_data.shape)
+
+    ::
+
+        (900, 0)
+
+    Instead of using a dlabel mask file, you can also mask by one of the
+    labelled structures contained in the data CIFTI file. This is most useful
+    for extracting subcortical regions. You can use the full structure name,
+    or anything recognised by nibabel's ``to_cifti_brain_structure_name``
+    method. Here, we extract data for the left amygdala, comprising 900
+    timepoints and 315 voxels.
+
+    >>> masker = CiftiMasker('left amygdala').fit()
+    >>> ROI_data = masker.transform(infile)
+    >>> print(ROI_data.shape)
+
+    ::
+
+        (900, 315)
+
+    Use the ``.inverse_transform`` method to reverse the process, creating a
+    new CIFTI object from the masked data. In general, you should run this
+    with the same settings you used for the forward ``transform`` method.
+
+    >>> new_img = masker.inverse_transform(ROI_data)
+    >>> new_img.to_filename('my_masked_data.dtseries.nii')
     """
     def __init__(self, mask_img):
         self.mask_img = mask_img
@@ -408,48 +505,40 @@ class CiftiMasker(object):
 
         dict_ : Dictionary returned by CiftiHandler.get_all_data
         data_handler : CiftiHandler for data image
-        block : 'all', 'surface', 'lh', 'rh', or 'volume'
+        block : 'all', 'surface', 'lh'/'L', 'rh'/'R', or 'volume'
         """
         # Error check
         if not any(X.size > 0 for X in dict_.values()):
             raise ValueError('CIFTI does not contain any data structures')
 
-        # Pre-allocate list for structures
-        array = []
-
-        # Get dtype and number of samples from first available block - needed
-        # when allocating zeros for missing blocks
+        # Get dtype and number of samples from first available block
         for X in dict_.values():
             if X.size > 0:
                 nSamp = X.shape[0]
                 dtype = X.dtype
                 break
 
+        # Pre-allocate array of zeros. Any blocks not allocated below will
+        # remain as zeros.
+        array = np.zeros([nSamp, data_handler.axis1.size], dtype=dtype)
+
         # Left surface
-        model = data_handler._get_struct_info('cortex_left')[1]
-        if block in ['lh','surface','all'] and dict_['lh'].size > 0:
-            array.append(dict_['lh'][..., model.vertex])
-        else:
-            nVtx = len(model.vertex)
-            array.append(np.zeros([nSamp, nVtx], dtype))
+        if block.lower() in ['lh','l','surface','all'] and dict_['lh'].size > 0:
+            slice_, model = data_handler._get_struct_info('cortex_left')[:2]
+            array[:, slice_] = dict_['lh'][..., model.vertex]
 
         # Right surface
-        model = data_handler._get_struct_info('cortex_right')[1]
-        if block in ['rh','surface','all'] and dict_['rh'].size > 0:
-            array.append(dict_['rh'][..., model.vertex])
-        else:
-            nVtx = len(model.vertex)
-            array.append(np.zeros([nSamp, nVtx], dtype))
+        if block.lower() in ['rh','r','surface','all'] and dict_['rh'].size > 0:
+            slice_, model = data_handler._get_struct_info('cortex_right')[:2]
+            array[:, slice_] = dict_['rh'][..., model.vertex]
 
         # Volume
-        if block in ['volume','all'] and dict_['volume'].size > 0:
-            array.append(dict_['volume'])
-        else:
-            nVox = data_handler._get_volume_mask().sum()
-            array.append(np.zeros([nSamp, nVox], dtype))
+        if block.lower() in ['volume','all'] and dict_['volume'].size > 0:
+            vol_mask = data_handler._get_volume_mask()
+            array[:, vol_mask] = dict_['volume']
 
-        # Concat arrays and return
-        return np.hstack(array)
+        # Return
+        return array
 
     def _parse_mapN(self, mapN):
         """
@@ -513,7 +602,7 @@ class CiftiMasker(object):
             Path to CIFTI data file (likely a dscalar or dtseries), or a
             Cifti2Image or CiftiHandler object containing the data.
 
-        mask_block : str {all | lh | rh | surface | volume}
+        mask_block : str { all | lh | rh | L | R | surface | volume }
             Which blocks from the CIFTI array to return data from. For example,
             could use to select data from only one hemisphere. Ignored if mask
             is a CIFTI structure. Default is 'all'.

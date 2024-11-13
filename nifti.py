@@ -41,6 +41,20 @@ class QuickMasker(object):
         set to True. If supplied, will cause this to take only voxels from
         this secondary mask that don't overlap with the primary mask. If
         omitted, will take voxels from whole volume outside the primary mask.
+
+    Methods
+    -------
+    * ``fit`` : Load mask
+    * ``transform`` : Load data and apply mask
+    * ``fit_transform`` : Fit and transform in one go
+    * ``inverse_transform`` : Create new NIFTI image from masked data
+
+    Example useage
+    --------------
+    >>> masker = QuickMasker('/path/to/mask.nii.gz').fit()
+    >>> ROI_data = masker.transform('/path/to/data.nii.gz')
+    >>> masker.inverse_trasnform(ROI_data) \\
+    ...       .to_filename('/path/to/masked_data.nii.gz')
     """
     def __init__(self, mask, mask2=None):
         self.mask = mask
@@ -161,9 +175,9 @@ class QuickMasker(object):
         self.fit()
         return self.transform(*args, **kwargs)
 
-    def inverse_transform(self, data, invert_mask=False, dtype=np.float32,
-                          return_as_nii=True, header=None, affine=None,
-                          extra=None):
+    def inverse_transform(self, data, labelID=None, invert_mask=False,
+                          dtype=np.float32, return_as_nii=True, header=None,
+                          affine=None, extra=None):
         """
         "Unmask" data array
 
@@ -173,8 +187,14 @@ class QuickMasker(object):
             [nVoxels] 1D or [nSamples x nVoxels] 2D nNumpy array containing
             data. Unmasked array will be 3D if data is 1D, or 4D if data is 2D.
 
+        labelID : int or None
+            Numeric value of label within mask to use, in case multiple labels
+            contained within mask. If None (default), use all non-zero labels.
+            Should match value supplied to forward transformation.
+
         invert_mask : boolean
-            Use inverted version of primary mask (default = False)
+            Use inverted version of primary mask (default = False). Should
+            match value supplied to forward transformation.
 
         dtype : valid data type
             Type to cast data to (default is float32).
@@ -204,19 +224,22 @@ class QuickMasker(object):
         # Setup
         self._check_is_fitted()
 
-        mask_array = self.mask_array.astype(bool)
+        if labelID is None:
+            mask = self.mask_array.astype(bool)
+        else:
+            mask = self.mask_array == labelID
 
         if invert_mask:
-            mask_array = ~self.mask_array
+            mask = ~mask
             if self.mask_array2 is not None:
-                mask_array = mask_array & self.mask_array2.astype(bool)
+                mask = mask & self.mask_array2.astype(bool)
 
         # Allocate new array and populate mask region with data
         dims = list(self.mask_img.shape)
         if data.ndim == 2:
             dims.append(data.shape[0])
         inv_data = np.zeros(dims, dtype=dtype)
-        inv_data[mask_array] = data.T
+        inv_data[mask] = data.T
 
         # Convert to NiftiImage if requested, and return
         if return_as_nii:
