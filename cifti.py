@@ -172,20 +172,16 @@ class CiftiHandler(object):
         # Assign remaining args to class
         self.full_surface = full_surface
 
+        # Extract structure information into dict
+        self.struct_info = {name:(slice_, model) for (name, slice_, model) \
+                            in self.axis1.iter_structures()}
+
     def _get_struct_info(self, struct_name):
         """
-        Return structure indices and axis model for given structure
+        Get slice, axis model, and resolved structure name for given structure
         """
-        # Check name
         struct_name = self.axis1.to_cifti_brain_structure_name(struct_name)
-
-        # Loop structures, return matching one
-        for name, struct_indices, model in self.axis1.iter_structures():
-            if name == struct_name:
-                return struct_indices, model, struct_name
-
-        # If we reach here then structure doesn't exist - raise error
-        raise Exception(f'No data found for structure: {struct_name}')
+        return *self.struct_info[struct_name], struct_name
 
     def _get_volume_mask(self):
         """
@@ -398,8 +394,8 @@ class CiftiMasker(object):
     Arguments
     ---------
     mask_img : str, Cifti2Image, or CiftiHandler
-        Path to input mask (likely a dlabel CIFTI file), long or short name
-        of a CIFTI structure (e.g. 'CIFTI_STRUCTURE_LEFT_HIPPOCAMPUS' or
+        Path to input mask (likely a dlabel or dscalar CIFTI file), name of a
+        CIFTI structure (e.g., 'CIFTI_STRUCTURE_LEFT_HIPPOCAMPUS' or
         'left hippocampus'), or Cifti2Image or CiftiHandler object containing
         mask data.
 
