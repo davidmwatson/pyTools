@@ -100,7 +100,7 @@ def imread(image, output_dtype=np.float64, pad_depth_channel=True,
             orig_dtype = im.dtype
             im = im.astype(np.float64)
             im, mask = np.split(im, [-1], axis=-1)
-            im *= mask / mask.max()
+            im *= mask / 255
             im = im.astype(orig_dtype)
         elif alpha_action == 'error':
             raise Exception('Image contains alpha channel')
