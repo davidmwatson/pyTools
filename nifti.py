@@ -44,26 +44,29 @@ class QuickMasker(object):
 
     Methods
     -------
-    * ``fit`` : Load mask
     * ``transform`` : Load data and apply mask
-    * ``fit_transform`` : Fit and transform in one go
     * ``inverse_transform`` : Create new NIFTI image from masked data
 
     Example useage
     --------------
-    >>> masker = QuickMasker('/path/to/mask.nii.gz').fit()
+    >>> masker = QuickMasker('/path/to/mask.nii.gz')
     >>> ROI_data = masker.transform('/path/to/data.nii.gz')
     >>> masker.inverse_trasnform(ROI_data) \\
     ...       .to_filename('/path/to/masked_data.nii.gz')
     """
     def __init__(self, mask, mask2=None):
+        # Assign args to class
         self.mask = mask
         self.mask2 = mask2
-        self._is_fitted = False
 
-    def _check_is_fitted(self):
-        if not self._is_fitted:
-            raise Exception('Must call .fit() method first')
+        # Load primary mask
+        self.mask_img, self.mask_array = self._load_mask(self.mask)
+
+        # Load secondary mask?
+        if self.mask2 is not None:
+            _, self.mask_array2 = self._load_mask(self.mask2)
+        else:
+            self.mask_array2 = None
 
     @staticmethod
     def _load_mask(mask):
@@ -92,23 +95,6 @@ class QuickMasker(object):
                             'or numpy array')
         return data
 
-    def fit(self):
-        """
-        Load mask image
-        """
-        # Load primary mask
-        self.mask_img, self.mask_array = self._load_mask(self.mask)
-
-        # Load secondary mask?
-        if self.mask2 is not None:
-            _, self.mask_array2 = self._load_mask(self.mask2)
-        else:
-            self.mask_array2 = None
-
-        # Finish up and return
-        self._is_fitted = True
-        return self
-
     def transform(self, imgs, labelID=None, invert_mask=False, vstack=False,
                   dtype=np.float64):
         """
@@ -125,7 +111,7 @@ class QuickMasker(object):
             contained within mask. If None (default), use all non-zero labels.
 
         invert_mask : bool
-            If True, load from vertices OUTSIDE of mask instead
+            If True, load from voxels OUTSIDE of mask instead
             (default = False)
 
         vstack : bool
@@ -144,8 +130,6 @@ class QuickMasker(object):
             axis if vstack is True.
         """
         # Setup
-        self._check_is_fitted()
-
         if not isinstance(imgs, (tuple, list)):
             imgs = [imgs]
 
@@ -170,10 +154,6 @@ class QuickMasker(object):
 
         # Return
         return data
-
-    def fit_transform(self, *args, **kwargs):
-        self.fit()
-        return self.transform(*args, **kwargs)
 
     def inverse_transform(self, data, labelID=None, invert_mask=False,
                           dtype=np.float32, return_as_nii=True, header=None,
@@ -222,8 +202,6 @@ class QuickMasker(object):
             Unmasked data in requested format.
         """
         # Setup
-        self._check_is_fitted()
-
         if labelID is None:
             mask = self.mask_array.astype(bool)
         else:
@@ -259,4 +237,3 @@ class QuickMasker(object):
 
         else:
             return inv_data
-

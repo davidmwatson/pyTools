@@ -115,10 +115,10 @@ class CiftiHandler(object):
 
     Methods
     -------
-    * get_volume_data : Extract volume data
-    * get_surface_data : Extract surface data for a given hemisphere
-    * get_all_data : Convenience function for extracting surface and volume data
-    * create_new_cifti : Create new CIFTI image from provided data
+    * ``get_volume_data`` : Extract volume data
+    * ``get_surface_data`` : Extract surface data for a given hemisphere
+    * ``get_all_data`` : Convenience function for extracting surface and volume data
+    * ``create_new_cifti`` : Create new CIFTI image from provided data
 
     Example usage
     -------------
@@ -401,12 +401,10 @@ class CiftiMasker(object):
 
     Methods
     -------
-    * fit : Load mask
-    * transform : Load dataset, applying mask
-    * transform_multiple : Load multiple datasets, applying mask
-    * fit_transform[_multiple] : Fit and transform in one go
-    * inverse_transform : Create new CIFTI image from masked data
-    * uncache : Clear cache
+    * ``transform`` : Load dataset, applying mask
+    * ``transform_multiple`` : Load multiple datasets, applying mask
+    * ``inverse_transform`` : Create new CIFTI image from masked data
+    * ``uncache`` : Clear cache
 
     Example usage
     -------------
@@ -414,7 +412,7 @@ class CiftiMasker(object):
 
     >>> maskfile = '/mnt/hcpdata/Facelab/100610/MNINonLinear/' \\
     ...     'fsaverage_LR32k/100610.aparc.32k_fs_LR.dlabel.nii'
-    >>> masker = CiftiMasker(maskfile).fit()
+    >>> masker = CiftiMasker(maskfile)
 
     Use the ``transform`` method to mask data. By default, this will mask by
     the label with a numerical ID of 1 - this will work if the dlabel file
@@ -462,14 +460,14 @@ class CiftiMasker(object):
 
         (900, 0)
 
-    Instead of using a dlabel mask file, you can also mask by one of the
+    Instead of using a CIFTI mask file, you can also mask by one of the
     labelled structures contained in the data CIFTI file. This is most useful
     for extracting subcortical regions. You can use the full structure name,
     or anything recognised by nibabel's ``to_cifti_brain_structure_name``
     method. Here, we extract data for the left amygdala, comprising 900
     timepoints and 315 voxels.
 
-    >>> masker = CiftiMasker('left amygdala').fit()
+    >>> masker = CiftiMasker('left amygdala')
     >>> ROI_data = masker.transform(infile)
     >>> print(ROI_data.shape)
 
@@ -485,13 +483,27 @@ class CiftiMasker(object):
     >>> new_img.to_filename('my_masked_data.dtseries.nii')
     """
     def __init__(self, mask_img):
+        # Assign arg to class
         self.mask_img = mask_img
-        self._is_fitted = False
 
-    def _check_is_fitted(self):
-        if not self._is_fitted:
-            raise Exception('This instance is not fitted yet. '
-                            'Call .fit method first.')
+        # Select CIFTI structure, or load from file, or pass through objects
+        try:
+            self.mask_struct = nib.cifti2.BrainModelAxis \
+                                  .to_cifti_brain_structure_name(self.mask_img)
+            self._mask_is_cifti_struct = True
+
+        except ValueError:
+            if isinstance(self.mask_img, CiftiHandler):
+                self.mask_handler = copy.deepcopy(CiftiHandler)
+                self.mask_handler.full_surface = True
+            elif (isinstance(self.mask_img, str) and os.path.isfile(self.mask_img)) \
+            or isinstance(self.mask_img, nib.Cifti2Image):
+                self.mask_handler = CiftiHandler(self.mask_img, full_surface=True)
+            else:
+                raise ValueError('Invalid mask image')
+
+            self.mask_dict = self.mask_handler.get_all_data(dtype=int)
+            self._mask_is_cifti_struct = False
 
     def _resample_to_data(self, dict_, data_handler, block='all'):
         """
@@ -562,32 +574,6 @@ class CiftiMasker(object):
         else:
             raise TypeError('Invalid label ID type')
 
-    def fit(self):
-        """
-        Load mask
-        """
-        # Select CIFTI structure, or load from file, or pass through objects
-        try:
-            self.mask_struct = nib.cifti2.BrainModelAxis \
-                                  .to_cifti_brain_structure_name(self.mask_img)
-            self._mask_is_cifti_struct = True
-        except ValueError:
-            if isinstance(self.mask_img, CiftiHandler):
-                self.mask_handler = copy.deepcopy(CiftiHandler)
-                self.mask_handler.full_surface = True
-            elif (isinstance(self.mask_img, str) and os.path.isfile(self.mask_img)) \
-            or isinstance(self.mask_img, nib.Cifti2Image):
-                self.mask_handler = CiftiHandler(self.mask_img, full_surface=True)
-            else:
-                raise ValueError('Invalid mask image')
-
-            self.mask_dict = self.mask_handler.get_all_data(dtype=int)
-            self._mask_is_cifti_struct = False
-
-        # Return
-        self._is_fitted = True
-        return self
-
     def transform(self, img, mask_block='all', labelID=1, mapN=0, dtype=None):
         """
         Load data from CIFTI and apply mask
@@ -624,9 +610,6 @@ class CiftiMasker(object):
         data_array : ndarray
             [nSamples x nGrayOrdinates] array of data values after masking
         """
-        # Error check
-        self._check_is_fitted()
-
         # Open handler for data file
         if isinstance(img, CiftiHandler):
             self.data_handler = copy.deepcopy(img)
@@ -692,14 +675,6 @@ class CiftiMasker(object):
             data = np.vstack(data)
         return data
 
-    def fit_transform(self, *args, **kwargs):
-        self.fit()
-        return self.transform(*args, **kwargs)
-
-    def fit_transform_multiple(self, *args, **kwargs):
-        self.fit()
-        return self.transform_multiple(*args, **kwargs)
-
     def inverse_transform(self, data_array, mask_block='all', labelID=1,
                           mapN=0, dtype=None, template_img=None,
                           return_as_cifti=True, *args, **kwargs):
@@ -714,8 +689,8 @@ class CiftiMasker(object):
             array containing masked data.
 
         mask_block : str {all | lh | rh | surface | volume}
-            Which blocks from the CIFTI array to return data from. Should
-            match value supplied to forward transform.
+            Which blocks in the CIFTI array to allocate data to. Should match
+            value supplied to forward transform.
 
         labelID : int or str
             ID or name of label to select if mask contains multiple labels.
@@ -748,9 +723,6 @@ class CiftiMasker(object):
             Data reshaped to full set of grayordinates. Returned as Cifti2Image
             object if return_as_cifti is True, otherwise returned as array.
         """
-        # Error check
-        self._check_is_fitted()
-
         # Check dtype
         if dtype is None:
             dtype = data_array.dtype
@@ -804,7 +776,6 @@ class CiftiMasker(object):
         """
         Clear mask and data from cache
         """
-        self._check_is_fitted()
         if not self._mask_is_cifti_struct:
             self.mask_handler.uncache()
         self.data_handler.uncache()
